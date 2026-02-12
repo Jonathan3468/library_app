@@ -1,5 +1,6 @@
 const express = require("express");
 const { sequelize } = require("./models");
+require("dotenv").config();
 
 const app = express();
 app.use(express.json());
@@ -8,7 +9,10 @@ app.use(express.json());
 const scanRoutes = require("./routes/scan.routes");
 
 
+const dashboardRoutes = require("./routes/dashboard.routes");
 
+
+const reportsRoutes = require("./routes/reports.routes");
 
 
 const authorRoutes = require("./routes/author.routes");
@@ -26,7 +30,8 @@ app.use("/borrowers", borrowerRoutes);
 app.use("/copies", copyRoutes);
 app.use("/requests", requestRoutes);
 app.use("/issues", issueRoutes);
-
+app.use("/dashboard", dashboardRoutes);
+app.use("/reports", reportsRoutes);
 
 // Sync DB
 sequelize.sync({ alter: true })
