@@ -6,7 +6,10 @@ const app = express();
 app.use(express.json());
 
 // Import routes
+const authRoutes = require("./routes/auth.routes");
 const scanRoutes = require("./routes/scan.routes");
+
+const genreRoutes = require("./routes/genre.routes");
 
 
 const dashboardRoutes = require("./routes/dashboard.routes");
@@ -21,8 +24,16 @@ const borrowerRoutes = require("./routes/borrower.routes");
 const copyRoutes = require("./routes/copy.routes");
 const requestRoutes = require("./routes/request.routes");
 const issueRoutes = require("./routes/issue.routes");
+const publicationRoutes = require("./routes/publication.routes");
+const categoryRoutes = require("./routes/category.routes");
+
+
 
 // Use routes
+app.use("/publications", publicationRoutes);
+app.use("/categories", categoryRoutes);
+app.use("/genres", genreRoutes);
+app.use("/auth", authRoutes);
 app.use("/authors", authorRoutes);
 app.use("/books", bookRoutes);
 app.use("/scan", scanRoutes);

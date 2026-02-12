@@ -14,6 +14,8 @@ const AuthorBook = require("./AuthorBook")(sequelize, DataTypes);
 const BookGenre = require("./BookGenre")(sequelize, DataTypes);
 const Request = require("./Request")(sequelize, DataTypes);
 const Issue = require("./Issue")(sequelize, DataTypes);
+const User = require("./user")(sequelize, DataTypes);
+
 
 // ================= RELATIONSHIPS =================
 
@@ -99,6 +101,7 @@ Copy.hasMany(Issue, {
 // ================= EXPORT =================
 
 module.exports = {
+  User,
   sequelize,
   Author,
   Book,

@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { Author } = require("../models");
+const { Genre } = require("../models");
 const auth = require("../middleware/auth.middleware");
 
 // ================= CREATE =================
@@ -10,21 +10,21 @@ router.post("/", auth, async (req, res) => {
 
     if (!name) {
       return res.status(400).json({
-        error: "Author name is required"
+        error: "Genre name is required"
       });
     }
 
-    // prevent duplicate author
-    const existing = await Author.findOne({ where: { name } });
+    // prevent duplicate genre
+    const existing = await Genre.findOne({ where: { name } });
     if (existing) {
       return res.status(400).json({
-        error: "Author already exists"
+        error: "Genre already exists"
       });
     }
 
-    const author = await Author.create({ name });
+    const genre = await Genre.create({ name });
 
-    res.status(201).json(author);
+    res.status(201).json(genre);
 
   } catch (err) {
     res.status(500).json({
@@ -36,8 +36,8 @@ router.post("/", auth, async (req, res) => {
 // ================= GET ALL =================
 router.get("/", auth, async (req, res) => {
   try {
-    const authors = await Author.findAll();
-    res.json(authors);
+    const genres = await Genre.findAll();
+    res.json(genres);
   } catch (err) {
     res.status(500).json({
       error: "Server error"
@@ -48,15 +48,15 @@ router.get("/", auth, async (req, res) => {
 // ================= GET ONE =================
 router.get("/:id", auth, async (req, res) => {
   try {
-    const author = await Author.findByPk(req.params.id);
+    const genre = await Genre.findByPk(req.params.id);
 
-    if (!author) {
+    if (!genre) {
       return res.status(404).json({
-        error: "Author not found"
+        error: "Genre not found"
       });
     }
 
-    res.json(author);
+    res.json(genre);
 
   } catch (err) {
     res.status(500).json({
@@ -70,18 +70,18 @@ router.put("/:id", auth, async (req, res) => {
   try {
     const { name } = req.body;
 
-    const author = await Author.findByPk(req.params.id);
-    if (!author) {
+    const genre = await Genre.findByPk(req.params.id);
+    if (!genre) {
       return res.status(404).json({
-        error: "Author not found"
+        error: "Genre not found"
       });
     }
 
-    await author.update({ name });
+    await genre.update({ name });
 
     res.json({
-      message: "Author updated successfully",
-      author
+      message: "Genre updated successfully",
+      genre
     });
 
   } catch (err) {
@@ -94,18 +94,18 @@ router.put("/:id", auth, async (req, res) => {
 // ================= DELETE =================
 router.delete("/:id", auth, async (req, res) => {
   try {
-    const author = await Author.findByPk(req.params.id);
+    const genre = await Genre.findByPk(req.params.id);
 
-    if (!author) {
+    if (!genre) {
       return res.status(404).json({
-        error: "Author not found"
+        error: "Genre not found"
       });
     }
 
-    await author.destroy();
+    await genre.destroy();
 
     res.json({
-      message: "Author deleted successfully"
+      message: "Genre deleted successfully"
     });
 
   } catch (err) {
