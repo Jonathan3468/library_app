@@ -1,0 +1,41 @@
+name: smartlib
+description: SmartLib — Library Management System (Flutter)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Routing — replaces react-router-dom
+  go_router: ^14.0.0
+
+  # HTTP client — replaces axios
+  dio: ^5.4.0
+
+  # Toast notifications — replaces sonner's <Toaster>
+  # Note: fluttertoast iOS deployment target must be 13.0+ in ios/Podfile
+  fluttertoast: ^8.2.4
+
+  # Local storage — replaces localStorage
+  shared_preferences: ^2.2.2
+
+  # Image picker — replaces <ImageUpload> component
+  image_picker: ^1.0.7
+
+  # HTTP client for ISBN lookup
+  http: ^1.2.0
+
+  # File picker — for CSV/Excel import
+  file_picker: ^6.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

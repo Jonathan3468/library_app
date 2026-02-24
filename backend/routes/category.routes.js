@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const { Category } = require("../models");
-const auth = require("../middleware/auth.middleware");
+const { auth, requireAdmin, requireLibrarian } = require("../middleware/auth.middleware");
+
 
 // ================= CREATE =================
 router.post("/", auth, async (req, res) => {

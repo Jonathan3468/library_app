@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 
-const authMiddleware = (req, res, next) => {
+// Basic authentication middleware
+const auth = (req, res, next) => {
   try {
     // 1️⃣ Get token from header
     const authHeader = req.headers.authorization;
@@ -35,4 +36,36 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-module.exports = authMiddleware;
+// Role-based middleware
+const requireRole = (...allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        error: "Authentication required"
+      });
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: "Access denied. Insufficient permissions.",
+        required_role: allowedRoles,
+        your_role: req.user.role
+      });
+    }
+
+    next();
+  };
+};
+
+// Specific role middlewares
+const requireAdmin = requireRole("admin");
+const requireLibrarian = requireRole("admin", "librarian");
+const requireMember = requireRole("admin", "librarian", "member");
+
+module.exports = {
+  auth,
+  requireRole,
+  requireAdmin,
+  requireLibrarian,
+  requireMember
+};
