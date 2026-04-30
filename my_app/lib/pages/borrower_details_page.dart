@@ -58,12 +58,10 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
     super.dispose();
   }
 
-  // ── FIXED _init ──────────────────────────────────────────────────────────
   Future<void> _init() async {
     final role = AuthService.getUserRole();
     _canEdit   = role == 'admin' || role == 'librarian';
 
-    // If a borrower ID was passed via route param, use it directly
     if (widget.borrowerId != null) {
       _id = widget.borrowerId;
       final myId = AuthService.getBorrowerId()?.toString();
@@ -72,25 +70,21 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
       return;
     }
 
-    // Member viewing /profile — no route param, must resolve own borrower ID
     String? myId = AuthService.getBorrowerId()?.toString();
 
     if (myId == null) {
-      // borrower_id wasn't in the stored login response — fetch it from the API
       try {
         final res = await ApiService.get('/borrowers/me');
         final fetchedId = res.data['borrower']?['borrower_id'];
         if (fetchedId != null) {
           myId = fetchedId.toString();
-          // Persist so we don't need to fetch again next time
           await AuthService.saveBorrowerId(fetchedId as int);
         }
-      } catch (_) {
-        // /borrowers/me failed — nothing more we can do
-      }
+      } catch (_) {}
     }
 
     if (myId == null) {
+      if (!mounted) return;
       setState(() {
         _error   = 'Could not determine your profile. Please log out and log in again.';
         _loading = false;
@@ -102,7 +96,6 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
     _isOwnData = true;
     await _fetchAll();
   }
-  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _fetchAll() async {
     await Future.wait([
@@ -114,10 +107,12 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
   }
 
   Future<void> _fetchBorrower() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
       final res = await ApiService.get('/borrowers/$_id');
       final d   = res.data as Map<String, dynamic>;
+      if (!mounted) return;
       setState(() {
         _borrower         = d['borrower'];
         _activeIssues     = d['active_issues']    ?? [];
@@ -130,6 +125,7 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
       _editAddressCtrl.text = _borrower?['address'] ?? '';
       _editRfCtrl.text      = _borrower?['rf_id']   ?? '';
     } catch (_) {
+      if (!mounted) return;
       setState(() => _error = 'Failed to load borrower details');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -137,24 +133,29 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
   }
 
   Future<void> _fetchFines() async {
+    if (!mounted) return;
     setState(() => _finesLoading = true);
     try {
       final res = await ApiService.get('/borrowers/$_id/fines');
+      if (!mounted) return;
       setState(() => _fines = res.data['fines'] ?? []);
     } catch (_) {}
     finally { if (mounted) setState(() => _finesLoading = false); }
   }
 
   Future<void> _fetchRequests() async {
+    if (!mounted) return;
     setState(() => _requestsLoading = true);
     try {
       final res = await ApiService.get('/requests', params: {'borrower_id': _id});
+      if (!mounted) return;
       setState(() => _requests = res.data['requests'] ?? []);
     } catch (_) {}
     finally { if (mounted) setState(() => _requestsLoading = false); }
   }
 
   Future<void> _fetchRenewals() async {
+    if (!mounted) return;
     setState(() => _renewalLoading = true);
     try {
       final endpoint = _isOwnData ? '/renewal-requests/my' : '/renewal-requests?borrower_id=$_id';
@@ -167,18 +168,22 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
           map[issueId] = r as Map<String, dynamic>;
         }
       }
+      if (!mounted) return;
       setState(() => _renewalMap = map);
     } catch (_) {}
     finally { if (mounted) setState(() => _renewalLoading = false); }
   }
 
   Future<void> _requestRenewal(int issueId) async {
+    if (!mounted) return;
     setState(() => _requestingRenewal.add(issueId));
     try {
       await ApiService.post('/renewal-requests', data: {'issue_id': issueId});
+      if (!mounted) return;
       _showSnack('Renewal request submitted — librarian will review it shortly');
       await _fetchRenewals();
     } catch (e) {
+      if (!mounted) return;
       _showSnack('Failed to submit renewal request');
     } finally {
       if (mounted) setState(() => _requestingRenewal.remove(issueId));
@@ -186,12 +191,15 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
   }
 
   Future<void> _cancelRequest(int requestId) async {
+    if (!mounted) return;
     setState(() => _cancellingIds.add(requestId));
     try {
       await ApiService.delete('/requests/$requestId');
+      if (!mounted) return;
       _showSnack('Request cancelled');
       await _fetchRequests();
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed to cancel request');
     } finally {
       if (mounted) setState(() => _cancellingIds.remove(requestId));
@@ -207,10 +215,14 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
         'address': _editAddressCtrl.text,
         'rf_id':   _editRfCtrl.text,
       });
+      if (!mounted) return;
       setState(() => _showEditModal = false);
       _showSnack('Updated successfully');
       await _fetchBorrower();
-    } catch (_) { _showSnack('Failed to update'); }
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Failed to update');
+    }
   }
 
   Future<void> _renewMembership() async {
@@ -220,12 +232,16 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
       confirmLabel: 'Renew',
       confirmColor: const Color(0xFF10B981),
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     try {
       await ApiService.put('/borrowers/renew/$_id');
+      if (!mounted) return;
       _showSnack('Membership renewed');
       await _fetchBorrower();
-    } catch (_) { _showSnack('Failed to renew'); }
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Failed to renew');
+    }
   }
 
   Future<void> _deleteBorrower() async {
@@ -235,11 +251,15 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
       confirmLabel: 'Delete',
       confirmColor: const Color(0xFFEF4444),
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     try {
       await ApiService.delete('/borrowers/$_id');
-      if (mounted) context.go('/borrowers');
-    } catch (_) { _showSnack('Failed to delete'); }
+      if (!mounted) return;
+      context.go('/borrowers');
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Failed to delete');
+    }
   }
 
   Future<bool> _confirm({required String title, required String desc, required String confirmLabel, required Color confirmColor}) async {
@@ -263,6 +283,7 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
   }
 
   void _showSnack(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -287,11 +308,15 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
     }
     if (_error != null) {
       return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
         body: Center(child: Text(_error!, style: const TextStyle(color: Color(0xFFEF4444)))),
       );
     }
     if (_borrower == null) {
-      return const Scaffold(body: Center(child: Text('Not found')));
+      return const Scaffold(
+        backgroundColor: Color(0xFFF9FAFB),
+        body: Center(child: Text('Not found')),
+      );
     }
 
     final b = _borrower!;
@@ -300,68 +325,104 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
+      // FIX: resizeToAvoidBottomInset prevents the modal from being pushed off-screen
+      // when the keyboard opens, which was causing a black/blank area.
+      resizeToAvoidBottomInset: false,
       body: Stack(children: [
-        SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                GestureDetector(
-                  onTap: () => context.go(_canEdit ? '/borrowers' : '/dashboard'),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.arrow_back, size: 18, color: Color(0xFF6B7280)),
-                    SizedBox(width: 4),
-                    Text('Back', style: TextStyle(fontSize: 14, color: Color(0xFF6B7280))),
-                  ]),
-                ),
-                const SizedBox(width: 12),
-                const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
-                const SizedBox(width: 12),
-                Text(
-                  _isOwnData && !_canEdit ? 'My Profile' : (b['borrower_name'] ?? ''),
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)),
-                ),
-                const Spacer(),
-                if (_canEdit || _isOwnData)
-                  _HeaderBtn(label: 'Edit', icon: Icons.edit_outlined,
-                      bg: Colors.white, color: const Color(0xFF374151),
-                      onTap: () => setState(() => _showEditModal = true)),
-                if (_canEdit) ...[
-                  const SizedBox(width: 8),
-                  _HeaderBtn(label: 'Renew', icon: Icons.autorenew,
-                      bg: const Color(0xFFECFDF5), color: const Color(0xFF065F46),
-                      onTap: _renewMembership),
-                  const SizedBox(width: 8),
-                  _HeaderBtn(label: 'Delete', icon: Icons.delete_outline,
-                      bg: const Color(0xFFFEF2F2), color: const Color(0xFFDC2626),
-                      onTap: _deleteBorrower),
-                ],
-              ]),
-              const SizedBox(height: 20),
-
-              LayoutBuilder(builder: (_, constraints) {
-                final wide = constraints.maxWidth > 700;
-                if (wide) {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(width: 280, child: _buildLeftPanel(b, membershipExpired)),
-                      const SizedBox(width: 16),
-                      Expanded(child: _buildRightPanel(b, pendingRequests)),
+        SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // FIX: Header row — buttons can overflow on small screens.
+                // Wrap the back-nav and title in a flexible row, and the
+                // action buttons in their own scrollable row so they never
+                // push outside the viewport.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => context.go(_canEdit ? '/borrowers' : '/dashboard'),
+                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.arrow_back, size: 18, color: Color(0xFF6B7280)),
+                            SizedBox(width: 4),
+                            Text('Back', style: TextStyle(fontSize: 14, color: Color(0xFF6B7280))),
+                          ]),
+                        ),
+                        const SizedBox(width: 12),
+                        const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _isOwnData && !_canEdit ? 'My Profile' : (b['borrower_name'] ?? ''),
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    // FIX: Action buttons on their own row so they never overflow
+                    // the header on narrow screens.
+                    if (_canEdit || _isOwnData) ...[
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (_canEdit || _isOwnData)
+                            _HeaderBtn(
+                              label: 'Edit', icon: Icons.edit_outlined,
+                              bg: Colors.white, color: const Color(0xFF374151),
+                              onTap: () => setState(() => _showEditModal = true),
+                            ),
+                          if (_canEdit) ...[
+                            _HeaderBtn(
+                              label: 'Renew', icon: Icons.autorenew,
+                              bg: const Color(0xFFECFDF5), color: const Color(0xFF065F46),
+                              onTap: _renewMembership,
+                            ),
+                            _HeaderBtn(
+                              label: 'Delete', icon: Icons.delete_outline,
+                              bg: const Color(0xFFFEF2F2), color: const Color(0xFFDC2626),
+                              onTap: _deleteBorrower,
+                            ),
+                          ],
+                        ],
+                      ),
                     ],
-                  );
-                }
-                return Column(children: [
-                  _buildLeftPanel(b, membershipExpired),
-                  const SizedBox(height: 16),
-                  _buildRightPanel(b, pendingRequests),
-                ]);
-              }),
-            ],
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                LayoutBuilder(builder: (_, constraints) {
+                  final wide = constraints.maxWidth > 700;
+                  if (wide) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(width: 280, child: _buildLeftPanel(b, membershipExpired)),
+                        const SizedBox(width: 16),
+                        Expanded(child: _buildRightPanel(b, pendingRequests)),
+                      ],
+                    );
+                  }
+                  return Column(children: [
+                    _buildLeftPanel(b, membershipExpired),
+                    const SizedBox(height: 16),
+                    _buildRightPanel(b, pendingRequests),
+                  ]);
+                }),
+              ],
+            ),
           ),
         ),
 
+        // FIX: Edit modal — wrapped in SafeArea and uses MediaQuery padding so
+        // the bottom sheet is never hidden behind the system UI or keyboard,
+        // preventing a blank/black overlay.
         if (_showEditModal && (_canEdit || _isOwnData)) _buildEditModal(),
       ]),
     );
@@ -384,7 +445,9 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
           ),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(b['borrower_name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF1F2937))),
+            Text(b['borrower_name'] ?? '',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF1F2937)),
+                overflow: TextOverflow.ellipsis),
             Text('ID #${b['borrower_id']}', style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
           ])),
         ]),
@@ -398,14 +461,18 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
           Row(children: [
             const Text('RF ID', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
             const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFBFDBFE)),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Text(b['rf_id'],
+                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF1D4ED8)),
+                    overflow: TextOverflow.ellipsis),
               ),
-              child: Text(b['rf_id'], style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF1D4ED8))),
             ),
           ]),
         ],
@@ -413,12 +480,16 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
           const SizedBox(height: 8),
           Row(children: [
             const Text('Membership', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-            const Spacer(),
-            Text(
-              '${_fmt(b['membership_expiry'])}${membershipExpired ? ' · Expired' : ''}',
-              style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w600,
-                color: membershipExpired ? const Color(0xFFDC2626) : const Color(0xFF374151),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${_fmt(b['membership_expiry'])}${membershipExpired ? ' · Expired' : ''}',
+                textAlign: TextAlign.end,
+                style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600,
+                  color: membershipExpired ? const Color(0xFFDC2626) : const Color(0xFF374151),
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ]),
@@ -438,14 +509,15 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
               color: _outstandingFines > 0 ? const Color(0xFFEF4444) : const Color(0xFF10B981),
               size: 18),
           const SizedBox(width: 8),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Outstanding Fines', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w600)),
-            Text('₹$_outstandingFines',
-                style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800,
-                    color: _outstandingFines > 0 ? const Color(0xFFDC2626) : const Color(0xFF059669))),
-          ]),
-          const Spacer(),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Outstanding Fines', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w600)),
+              Text('₹$_outstandingFines',
+                  style: TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.w800,
+                      color: _outstandingFines > 0 ? const Color(0xFFDC2626) : const Color(0xFF059669))),
+            ]),
+          ),
           if (_outstandingFines > 0 && _canEdit)
             GestureDetector(
               onTap: () => context.go('/fines'),
@@ -459,10 +531,10 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
         crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
         crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 2,
         children: [
-          _StatCard(label: 'Books Read',  value: '$_totalBorrowed',      icon: Icons.menu_book_outlined, color: const Color(0xFF6366F1)),
-          _StatCard(label: 'Active Now',  value: '${_activeIssues.length}', icon: Icons.access_time,     color: const Color(0xFF2563EB)),
-          _StatCard(label: 'Requests',    value: '${_requests.length}',  icon: Icons.inbox_outlined,     color: const Color(0xFFF59E0B)),
-          _StatCard(label: 'Fines',       value: '${_fines.length}',     icon: Icons.receipt_outlined,   color: const Color(0xFFEF4444)),
+          _StatCard(label: 'Books Read',  value: '$_totalBorrowed',         icon: Icons.menu_book_outlined, color: const Color(0xFF6366F1)),
+          _StatCard(label: 'Active Now',  value: '${_activeIssues.length}', icon: Icons.access_time,        color: const Color(0xFF2563EB)),
+          _StatCard(label: 'Requests',    value: '${_requests.length}',     icon: Icons.inbox_outlined,     color: const Color(0xFFF59E0B)),
+          _StatCard(label: 'Fines',       value: '${_fines.length}',        icon: Icons.receipt_outlined,   color: const Color(0xFFEF4444)),
         ],
       ),
 
@@ -514,12 +586,16 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
                 color: active ? const Color(0xFF2563EB) : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
               ),
+              // FIX: Wrap tab label row content so it doesn't overflow on small screens
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Icon(tabs[i].icon, size: 14, color: active ? Colors.white : const Color(0xFF9CA3AF)),
                 const SizedBox(width: 5),
-                Text(tabs[i].label,
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                        color: active ? Colors.white : const Color(0xFF6B7280))),
+                Flexible(
+                  child: Text(tabs[i].label,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                          color: active ? Colors.white : const Color(0xFF6B7280)),
+                      overflow: TextOverflow.ellipsis),
+                ),
                 if (i == 2 && pendingRequests > 0) ...[
                   const SizedBox(width: 5),
                   Container(
@@ -529,8 +605,7 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text('$pendingRequests',
-                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold,
-                            color: active ? Colors.white : Colors.white)),
+                        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
                 ],
               ]),
@@ -596,63 +671,78 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Color(0xFFF9FAFB))),
       ),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
-          Text(copyCode, style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF), fontFamily: 'monospace')),
-          const SizedBox(height: 4),
-          Text('Issued ${_fmt(issue['check_out'])}',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-          if (renewal != null) ...[
-            const SizedBox(height: 4),
-            _RenewalBadge(status: renewal['status']),
-            if (renewal['status'] == 'denied' && renewal['notes'] != null)
-              Text('Note: ${renewal['notes']}',
-                  style: const TextStyle(fontSize: 10, color: Color(0xFFEF4444))),
-          ],
-        ])),
-        const SizedBox(width: 12),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text('Due ${_fmt(issue['due_date'])}',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                  color: overdue ? const Color(0xFFDC2626) : const Color(0xFF059669))),
-          if (overdue)
-            const Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.warning_amber, size: 11, color: Color(0xFFEF4444)),
-              SizedBox(width: 2),
-              Text('Overdue', style: TextStyle(fontSize: 10, color: Color(0xFFEF4444))),
+      // FIX: Use CrossAxisAlignment.start and constrain the right-hand column
+      // with Flexible so it never forces the Row wider than the screen.
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937)),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2),
+              Text(copyCode, style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF), fontFamily: 'monospace')),
+              const SizedBox(height: 4),
+              Text('Issued ${_fmt(issue['check_out'])}',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+              if (renewal != null) ...[
+                const SizedBox(height: 4),
+                _RenewalBadge(status: renewal['status']),
+                if (renewal['status'] == 'denied' && renewal['notes'] != null)
+                  Text('Note: ${renewal['notes']}',
+                      style: const TextStyle(fontSize: 10, color: Color(0xFFEF4444))),
+              ],
             ]),
-          if (_isOwnData) ...[
-            const SizedBox(height: 4),
-            if (renewal?['status'] == 'pending')
-              const Text('Awaiting review',
-                  style: TextStyle(fontSize: 10, color: Color(0xFFF59E0B), fontWeight: FontWeight.w500))
-            else if (canRequest)
-              GestureDetector(
-                onTap: () => _requestRenewal(issueId),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(color: const Color(0xFFBFDBFE)),
+          ),
+          const SizedBox(width: 12),
+          // FIX: Right column given intrinsic width constraint — no more overflow
+          IntrinsicWidth(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Text('Due ${_fmt(issue['due_date'])}',
+                  style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600,
+                      color: overdue ? const Color(0xFFDC2626) : const Color(0xFF059669))),
+              if (overdue)
+                const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.warning_amber, size: 11, color: Color(0xFFEF4444)),
+                  SizedBox(width: 2),
+                  Text('Overdue', style: TextStyle(fontSize: 10, color: Color(0xFFEF4444))),
+                ]),
+              if (_isOwnData) ...[
+                const SizedBox(height: 4),
+                if (renewal?['status'] == 'pending')
+                  const Text('Awaiting review',
+                      style: TextStyle(fontSize: 10, color: Color(0xFFF59E0B), fontWeight: FontWeight.w500))
+                else if (canRequest)
+                  GestureDetector(
+                    onTap: () => _requestRenewal(issueId),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(7),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.autorenew, size: 11, color: Color(0xFF2563EB)),
+                        SizedBox(width: 4),
+                        Text('Request Renewal',
+                            style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
                   ),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.autorenew, size: 11, color: Color(0xFF2563EB)),
-                    SizedBox(width: 4),
-                    Text('Request Renewal', style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.w600)),
-                  ]),
-                ),
-              ),
-          ],
-        ]),
-      ]),
+              ],
+            ]),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildFineRow(Map<String, dynamic> fine) {
-    final amount = fine['fine'] ?? fine['amount'];
-    final status = fine['status'] as String? ?? 'pending';
+    final amount   = fine['fine'] ?? fine['amount'];
+    final status   = fine['status'] as String? ?? 'pending';
     final isPaid   = status == 'paid';
     final isWaived = status == 'waived';
 
@@ -665,13 +755,19 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFF9FAFB)))),
         child: Row(children: [
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(fine['book_title'] ?? fine['reason'] ?? '—',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
-            Text(fine['type'] == 'custom_fine' ? 'Custom fine' : 'Late return',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-          ])),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(fine['book_title'] ?? fine['reason'] ?? '—',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937)),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2),
+              Text(fine['type'] == 'custom_fine' ? 'Custom fine' : 'Late return',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+            ]),
+          ),
+          const SizedBox(width: 12),
+          // FIX: Right side wrapped so it never overflows
+          Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
             Text('₹$amount', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFFDC2626))),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -700,52 +796,72 @@ class _BorrowerDetailsPageState extends State<BorrowerDetailsPage> {
   }
 
   Widget _buildEditModal() {
+    // FIX: Use a proper modal sheet approach with SafeArea so the overlay is
+    // never clipped by system insets, and SingleChildScrollView ensures the
+    // form is fully scrollable when the keyboard appears — no black gap.
     return GestureDetector(
       onTap: () => setState(() => _showEditModal = false),
       child: Container(
         color: const Color(0x80000000),
-        child: Center(
-          child: GestureDetector(
-            onTap: () {},
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              constraints: const BoxConstraints(maxWidth: 460),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(_isOwnData && !_canEdit ? 'Edit My Info' : 'Edit Borrower',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 20),
-                    if (_canEdit) ...[
-                      _EditField(label: 'Name *', ctrl: _editNameCtrl),
-                      _EditField(label: 'RF ID',  ctrl: _editRfCtrl),
-                    ],
-                    _EditField(label: 'Email',   ctrl: _editEmailCtrl, type: TextInputType.emailAddress),
-                    _EditField(label: 'Phone',   ctrl: _editPhoneCtrl, type: TextInputType.phone),
-                    _EditField(label: 'Address', ctrl: _editAddressCtrl, maxLines: 2),
-                    const SizedBox(height: 16),
-                    Row(children: [
-                      Expanded(child: ElevatedButton(
-                        onPressed: _updateBorrower,
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 13), elevation: 0),
-                        child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w600)),
-                      )),
-                      const SizedBox(width: 10),
-                      Expanded(child: OutlinedButton(
-                        onPressed: () => setState(() => _showEditModal = false),
-                        style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFFE5E7EB)),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 13)),
-                        child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-                      )),
-                    ]),
-                  ]),
+        child: SafeArea(
+          child: Center(
+            child: GestureDetector(
+              onTap: () {}, // absorb taps so tapping inside doesn't dismiss
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                constraints: const BoxConstraints(maxWidth: 460),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewInsets.bottom,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(_isOwnData && !_canEdit ? 'Edit My Info' : 'Edit Borrower',
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                            GestureDetector(
+                              onTap: () => setState(() => _showEditModal = false),
+                              child: const Icon(Icons.close, size: 20, color: Color(0xFF9CA3AF)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        if (_canEdit) ...[
+                          _EditField(label: 'Name *', ctrl: _editNameCtrl),
+                          _EditField(label: 'RF ID',  ctrl: _editRfCtrl),
+                        ],
+                        _EditField(label: 'Email',   ctrl: _editEmailCtrl, type: TextInputType.emailAddress),
+                        _EditField(label: 'Phone',   ctrl: _editPhoneCtrl, type: TextInputType.phone),
+                        _EditField(label: 'Address', ctrl: _editAddressCtrl, maxLines: 2),
+                        const SizedBox(height: 16),
+                        Row(children: [
+                          Expanded(child: ElevatedButton(
+                            onPressed: _updateBorrower,
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF2563EB), foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(vertical: 13), elevation: 0),
+                            child: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w600)),
+                          )),
+                          const SizedBox(width: 10),
+                          Expanded(child: OutlinedButton(
+                            onPressed: () => setState(() => _showEditModal = false),
+                            style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFFE5E7EB)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(vertical: 13)),
+                            child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+                          )),
+                        ]),
+                      ]),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -778,12 +894,14 @@ class _HistoryTabState extends State<_HistoryTab> {
 
   Future<void> _fetch({int page = 1, String? filter}) async {
     final f = filter ?? _filter;
+    if (!mounted) return;
     setState(() { _loading = true; _page = page; _filter = f; });
     try {
       final res = await ApiService.get(
         '/borrowers/${widget.borrowerId}/issues',
         params: {'page': page, 'limit': 20, 'filter': f},
       );
+      if (!mounted) return;
       setState(() {
         _issues     = res.data['issues'] ?? [];
         _pagination = res.data['pagination'];
@@ -816,21 +934,24 @@ class _HistoryTabState extends State<_HistoryTab> {
         ]),
         const Divider(height: 20, color: Color(0xFFF3F4F6)),
 
-        Row(children: filters.map((f) => GestureDetector(
-          onTap: () => _fetch(page: 1, filter: f.$1),
-          child: Container(
-            margin: const EdgeInsets.only(right: 6),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: _filter == f.$1 ? const Color(0xFF2563EB) : Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _filter == f.$1 ? const Color(0xFF2563EB) : const Color(0xFFE5E7EB)),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: filters.map((f) => GestureDetector(
+            onTap: () => _fetch(page: 1, filter: f.$1),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _filter == f.$1 ? const Color(0xFF2563EB) : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _filter == f.$1 ? const Color(0xFF2563EB) : const Color(0xFFE5E7EB)),
+              ),
+              child: Text(f.$2,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                      color: _filter == f.$1 ? Colors.white : const Color(0xFF6B7280))),
             ),
-            child: Text(f.$2,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                    color: _filter == f.$1 ? Colors.white : const Color(0xFF6B7280))),
-          ),
-        )).toList()),
+          )).toList(),
+        ),
         const SizedBox(height: 12),
 
         if (_loading)
@@ -857,7 +978,9 @@ class _HistoryTabState extends State<_HistoryTab> {
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(issue['book_title'] ?? '—',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937)),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 2),
                     Text(issue['copy_code'] ?? '',
                         style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF9CA3AF))),
                     const SizedBox(height: 6),
@@ -868,26 +991,31 @@ class _HistoryTabState extends State<_HistoryTab> {
                           style: const TextStyle(fontSize: 11, color: Color(0xFF059669)))
                     else
                       Text('Due ${_fmt(issue['due_date'])}${overdue ? ' · Overdue' : ''}',
-                          style: TextStyle(fontSize: 11, fontWeight: overdue ? FontWeight.w700 : FontWeight.normal,
+                          style: TextStyle(fontSize: 11,
+                              fontWeight: overdue ? FontWeight.w700 : FontWeight.normal,
                               color: overdue ? const Color(0xFFDC2626) : const Color(0xFF2563EB))),
                   ])),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    _StatusBadge(
-                      label: returned ? 'Returned' : overdue ? 'Overdue' : 'Active',
-                      color: returned ? const Color(0xFF059669) : overdue ? const Color(0xFFDC2626) : const Color(0xFF2563EB),
-                      bg: returned ? const Color(0xFFECFDF5) : overdue ? const Color(0xFFFEF2F2) : const Color(0xFFEFF6FF),
-                      border: returned ? const Color(0xFFA7F3D0) : overdue ? const Color(0xFFFECACA) : const Color(0xFFBFDBFE),
-                    ),
-                    if (hasFine) ...[
-                      const SizedBox(height: 4),
+                  const SizedBox(width: 8),
+                  // FIX: Right column constrained with IntrinsicWidth
+                  IntrinsicWidth(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                       _StatusBadge(
-                        label: '₹${issue['fine']} ${issue['fine_paid'] == true ? 'paid' : 'fine'}',
-                        color: issue['fine_paid'] == true ? const Color(0xFF6B7280) : const Color(0xFFDC2626),
-                        bg: issue['fine_paid'] == true ? const Color(0xFFF3F4F6) : const Color(0xFFFEF2F2),
-                        border: issue['fine_paid'] == true ? const Color(0xFFE5E7EB) : const Color(0xFFFECACA),
+                        label: returned ? 'Returned' : overdue ? 'Overdue' : 'Active',
+                        color: returned ? const Color(0xFF059669) : overdue ? const Color(0xFFDC2626) : const Color(0xFF2563EB),
+                        bg: returned ? const Color(0xFFECFDF5) : overdue ? const Color(0xFFFEF2F2) : const Color(0xFFEFF6FF),
+                        border: returned ? const Color(0xFFA7F3D0) : overdue ? const Color(0xFFFECACA) : const Color(0xFFBFDBFE),
                       ),
-                    ],
-                  ]),
+                      if (hasFine) ...[
+                        const SizedBox(height: 4),
+                        _StatusBadge(
+                          label: '₹${issue['fine']} ${issue['fine_paid'] == true ? 'paid' : 'fine'}',
+                          color: issue['fine_paid'] == true ? const Color(0xFF6B7280) : const Color(0xFFDC2626),
+                          bg: issue['fine_paid'] == true ? const Color(0xFFF3F4F6) : const Color(0xFFFEF2F2),
+                          border: issue['fine_paid'] == true ? const Color(0xFFE5E7EB) : const Color(0xFFFECACA),
+                        ),
+                      ],
+                    ]),
+                  ),
                 ]),
               );
             }),
@@ -1013,7 +1141,9 @@ class _RequestsTabState extends State<_RequestsTab> {
                   ]),
                   const SizedBox(height: 6),
                   Text(req['Copy']?['Book']?['title'] ?? '—',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937)),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2),
                   Text(req['Copy']?['copy_code'] ?? '',
                       style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF9CA3AF))),
                   const SizedBox(height: 4),
@@ -1094,10 +1224,14 @@ class _ExpandableSectionState extends State<_ExpandableSection> {
             child: Row(children: [
               Icon(widget.icon, size: 16, color: const Color(0xFF9CA3AF)),
               const SizedBox(width: 8),
-              Text(widget.title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1F2937))),
+              Expanded(
+                child: Text(widget.title,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)),
+                    overflow: TextOverflow.ellipsis),
+              ),
               const SizedBox(width: 8),
               _CountBadge('${widget.count}'),
-              const Spacer(),
+              const SizedBox(width: 8),
               Icon(_expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                   size: 16, color: const Color(0xFF9CA3AF)),
             ]),
@@ -1129,10 +1263,16 @@ class _StatCard extends StatelessWidget {
       child: Row(children: [
         Icon(icon, size: 18, color: color),
         const SizedBox(width: 8),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1F2937))),
-          Text(label, style: const TextStyle(fontSize: 9, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w500)),
-        ]),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(value,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1F2937)),
+                overflow: TextOverflow.ellipsis),
+            Text(label,
+                style: const TextStyle(fontSize: 9, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis),
+          ]),
+        ),
       ]),
     );
   }
@@ -1232,10 +1372,14 @@ class _ProfileRow extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(children: [
         Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-        const Spacer(),
-        Flexible(child: Text(value,
-            textAlign: TextAlign.end,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF374151)))),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(value,
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF374151))),
+        ),
       ]),
     );
   }

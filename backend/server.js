@@ -63,4 +63,9 @@ const { startNotificationScheduler } = require('./jobs/notificationScheduler');
 console.log('✅ Database connected');
 
 const PORT = 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => { 
+  
+  console.log(`Server running on port ${PORT}`);
+  startNotificationScheduler();
+
+});

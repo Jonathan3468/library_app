@@ -28,6 +28,16 @@ class _UserManagementPageState extends State<UserManagementPage> {
   String _newRole = '';
   Map<String, dynamic>? _createBorrower;
 
+  // ── Password reset (admin only) ──────────────────────────────────────────
+  Map<String, dynamic>? _passwordUser;
+  final _newPassCtrl     = TextEditingController();
+  final _confirmPassCtrl = TextEditingController();
+  bool _newPassObscure     = true;
+  bool _confirmPassObscure = true;
+  String? _passError;
+  String? _passServerError;
+  bool _passLoading = false;
+
   final _rfIdCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
@@ -37,6 +47,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
   final _createEmailCtrl = TextEditingController();
   final _createPassCtrl = TextEditingController();
   final _createConfirmCtrl = TextEditingController();
+
+  // Cached so we don't call it on every build
+  final bool _isAdmin = AuthService.isAdmin();
 
   @override
   void initState() {
@@ -50,15 +63,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
     _rfIdCtrl.dispose(); _phoneCtrl.dispose(); _addressCtrl.dispose();
     _editRfCtrl.dispose(); _editPhoneCtrl.dispose(); _editAddressCtrl.dispose();
     _createEmailCtrl.dispose(); _createPassCtrl.dispose(); _createConfirmCtrl.dispose();
+    _newPassCtrl.dispose(); _confirmPassCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _fetchUsers() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       final res = await ApiService.get('/auth/users');
+      if (!mounted) return;
       setState(() => _users = res.data['users'] ?? []);
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed to load users');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -66,12 +83,15 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Future<void> _fetchUnlinkedBorrowers() async {
+    if (!mounted) return;
     setState(() => _borrowersLoading = true);
     try {
       final res = await ApiService.get('/borrowers');
       final all = (res.data is List) ? res.data as List : [];
+      if (!mounted) return;
       setState(() => _borrowers = all.where((b) => b['user_id'] == null).toList());
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed to load borrowers');
     } finally {
       if (mounted) setState(() => _borrowersLoading = false);
@@ -106,11 +126,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
         'phone': _phoneCtrl.text.isEmpty ? null : _phoneCtrl.text,
         'address': _addressCtrl.text.isEmpty ? null : _addressCtrl.text,
       });
+      if (!mounted) return;
       _showSnack('RF ID assigned to ${_assignUser!['name']}', success: true);
       setState(() => _assignUser = null);
       _rfIdCtrl.clear(); _phoneCtrl.clear(); _addressCtrl.clear();
       _fetchUsers();
     } catch (e) {
+      if (!mounted) return;
       _showSnack('Failed to assign RF ID');
     }
   }
@@ -123,23 +145,28 @@ class _UserManagementPageState extends State<UserManagementPage> {
         'phone': _editPhoneCtrl.text,
         'address': _editAddressCtrl.text,
       });
+      if (!mounted) return;
       _showSnack('Borrower profile updated', success: true);
       setState(() => _editUser = null);
       _fetchUsers();
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed to update');
     }
   }
 
   Future<void> _handleDeleteUser() async {
     if (_deleteUser == null) return;
+    if (!mounted) return;
     setState(() => _deleteLoading = true);
     try {
       await ApiService.delete('/auth/users/${_deleteUser!['id']}');
+      if (!mounted) return;
       _showSnack('"${_deleteUser!['name']}" deleted', success: true);
       setState(() { _deleteUser = null; _deleteLoading = false; });
       _fetchUsers();
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed to delete');
       setState(() => _deleteLoading = false);
     }
@@ -148,9 +175,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
   Future<void> _handleToggleActive(Map<String, dynamic> user) async {
     try {
       await ApiService.put('/auth/users/${user['id']}/toggle-active');
+      if (!mounted) return;
       _showSnack('User ${user['is_active'] == true ? 'deactivated' : 'activated'}', success: true);
       _fetchUsers();
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed');
     }
   }
@@ -159,10 +188,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
     if (_roleUser == null) return;
     try {
       await ApiService.put('/auth/users/${_roleUser!['id']}/role', data: {'role': _newRole});
+      if (!mounted) return;
       _showSnack('Role changed to $_newRole', success: true);
       setState(() { _roleUser = null; _newRole = ''; });
       _fetchUsers();
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed to change role');
     }
   }
@@ -180,17 +211,81 @@ class _UserManagementPageState extends State<UserManagementPage> {
         'email': _createEmailCtrl.text,
         'password': _createPassCtrl.text,
       });
+      if (!mounted) return;
       _showSnack('Account created for ${_createBorrower!['borrower_name']}', success: true);
       setState(() => _createBorrower = null);
       _createEmailCtrl.clear(); _createPassCtrl.clear(); _createConfirmCtrl.clear();
       _fetchUnlinkedBorrowers();
     } catch (_) {
+      if (!mounted) return;
       _showSnack('Failed to create account');
     }
   }
 
+  // ── Admin: change another user's password ──────────────────────────────────
+  Future<void> _handleAdminChangePassword() async {
+    final newPass    = _newPassCtrl.text;
+    final confirm    = _confirmPassCtrl.text;
+
+    // Validate
+    String? err;
+    if (newPass.isEmpty) {
+      err = 'New password is required.';
+    } else if (newPass.length < 8) {
+      err = 'Password must be at least 8 characters.';
+    } else if (!RegExp(r'[A-Z]').hasMatch(newPass)) {
+      err = 'Include at least one uppercase letter.';
+    } else if (!RegExp(r'[0-9]').hasMatch(newPass)) {
+      err = 'Include at least one number.';
+    } else if (newPass != confirm) {
+      err = 'Passwords do not match.';
+    }
+
+    if (err != null) {
+      setState(() { _passError = err; _passServerError = null; });
+      return;
+    }
+
+    setState(() { _passLoading = true; _passError = null; _passServerError = null; });
+    try {
+      await ApiService.put(
+        '/auth/users/${_passwordUser!['id']}/password',
+        data: {'new_password': newPass},
+      );
+      if (!mounted) return;
+      _showSnack('Password updated for ${_passwordUser!['name']}', success: true);
+      setState(() { _passwordUser = null; });
+      _newPassCtrl.clear();
+      _confirmPassCtrl.clear();
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _passServerError = _extractError(err));
+    } finally {
+      if (mounted) setState(() => _passLoading = false);
+    }
+  }
+
+  /// Extracts a clean message from a Dio error.
+  String _extractError(Object err) {
+    try {
+      // Dio response body
+      final dynamic e = err;
+      final data = e.response?.data;
+      if (data is Map) {
+        final msg = data['error'] ?? data['message'] ?? data['msg'];
+        if (msg != null && msg.toString().trim().isNotEmpty) return msg.toString().trim();
+      }
+      final status = e.response?.statusCode as int?;
+      if (status == 403) return 'You do not have permission to change this password.';
+      if (status == 404) return 'User not found.';
+      if (status != null) return 'Server error ($status). Please try again.';
+    } catch (_) {}
+    return 'Something went wrong. Please try again.';
+  }
+
   void _showSnack(String msg, {bool success = false}) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: success ? Colors.green : Colors.red),
     );
   }
@@ -215,12 +310,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
+      resizeToAvoidBottomInset: false,
       body: Stack(children: [
         SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Header
               const Text('User Management',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1F2937))),
               const Text('Manage accounts, roles, and borrower links',
@@ -232,7 +327,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E7EB))),
                 child: Column(children: [
-                  // Tabs
                   Row(children: [
                     Expanded(child: Container(
                       padding: const EdgeInsets.all(4),
@@ -244,7 +338,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     )),
                   ]),
                   const SizedBox(height: 10),
-                  // Search
                   TextField(
                     controller: _searchCtrl,
                     onChanged: (v) => setState(() => _search = v),
@@ -274,12 +367,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
           ),
         ),
 
-        // Modals
-        if (_assignUser != null) _buildAssignModal(),
-        if (_editUser != null) _buildEditModal(),
-        if (_deleteUser != null) _buildDeleteModal(),
-        if (_roleUser != null) _buildRoleModal(),
+        if (_assignUser != null)   _buildAssignModal(),
+        if (_editUser != null)     _buildEditModal(),
+        if (_deleteUser != null)   _buildDeleteModal(),
+        if (_roleUser != null)     _buildRoleModal(),
         if (_createBorrower != null) _buildCreateAccountModal(),
+        if (_passwordUser != null) _buildChangePasswordModal(),   // ← new
       ]),
     );
   }
@@ -341,11 +434,14 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Widget _buildUserCard(Map<String, dynamic> user) {
-    final name = user['name'] as String? ?? '';
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-    final role = user['role'] as String? ?? 'member';
+    final name     = user['name'] as String? ?? '';
+    final initial  = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final role     = user['role'] as String? ?? 'member';
     final isActive = user['is_active'] == true;
     final borrower = user['borrower'] as Map<String, dynamic>?;
+
+    // Admins can reset passwords for librarians and members, but not other admins
+    final canResetPassword = _isAdmin && role != 'admin';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -357,7 +453,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-        // Row 1: avatar + name/email + active badge
         Row(children: [
           CircleAvatar(
             radius: 20,
@@ -366,10 +461,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
           ),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF1F2937))),
-            Text(user['email'] ?? '', style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)), overflow: TextOverflow.ellipsis),
+            Text(name,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)),
+                overflow: TextOverflow.ellipsis),
+            Text(user['email'] ?? '',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                overflow: TextOverflow.ellipsis),
           ])),
-          // Active toggle badge
           GestureDetector(
             onTap: () => _handleToggleActive(user),
             child: Container(
@@ -394,9 +492,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
         const Divider(height: 1, color: Color(0xFFF3F4F6)),
         const SizedBox(height: 10),
 
-        // Row 2: role + borrower profile
         Row(children: [
-          // Role chip (tappable)
           GestureDetector(
             onTap: () => _showRoleSheet(user),
             child: Container(
@@ -415,17 +511,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
           ),
           const SizedBox(width: 10),
 
-          // Borrower profile
           Expanded(child: borrower != null
               ? Row(children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: const Color(0xFFBFDBFE))),
-                    child: Text(borrower['rf_id'] ?? 'No RF ID',
-                        style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF1D4ED8))),
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: const Color(0xFFBFDBFE))),
+                      child: Text(borrower['rf_id'] ?? 'No RF ID',
+                          style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF1D4ED8)),
+                          overflow: TextOverflow.ellipsis),
+                    ),
                   ),
                   const SizedBox(width: 6),
                   GestureDetector(
@@ -456,7 +554,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 )),
         ]),
 
-        // Action buttons
         const SizedBox(height: 10),
         Row(mainAxisAlignment: MainAxisAlignment.end, children: [
           if (borrower != null)
@@ -465,12 +562,35 @@ class _UserManagementPageState extends State<UserManagementPage> {
               label: 'Edit',
               onTap: () {
                 setState(() => _editUser = user);
-                _editRfCtrl.text = borrower['rf_id'] ?? '';
-                _editPhoneCtrl.text = borrower['phone'] ?? '';
+                _editRfCtrl.text  = borrower['rf_id'] ?? '';
+                _editPhoneCtrl.text   = borrower['phone'] ?? '';
                 _editAddressCtrl.text = borrower['address'] ?? '';
               },
             ),
-          const SizedBox(width: 6),
+          if (borrower != null) const SizedBox(width: 6),
+
+          // ── Admin-only password reset button ───────────────────────────
+          if (canResetPassword) ...[
+            _SmallBtn(
+              icon: Icons.key_outlined,
+              label: 'Reset Password',
+              color: const Color(0xFF7C3AED),
+              bg: const Color(0xFFF5F3FF),
+              onTap: () {
+                _newPassCtrl.clear();
+                _confirmPassCtrl.clear();
+                setState(() {
+                  _passwordUser       = user;
+                  _passError          = null;
+                  _passServerError    = null;
+                  _newPassObscure     = true;
+                  _confirmPassObscure = true;
+                });
+              },
+            ),
+            const SizedBox(width: 6),
+          ],
+
           _SmallBtn(
             icon: Icons.delete_outline,
             label: 'Delete',
@@ -512,7 +632,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
 
   Widget _buildUnlinkedTab() {
     return Column(children: [
-      // Banner
       Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -576,10 +695,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
             child: Text(initial, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF6B7280)))),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
+          Text(name,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937)),
+              overflow: TextOverflow.ellipsis),
           Text(
             'ID #${b['borrower_id']}${b['rf_id'] != null ? ' · RF: ${b['rf_id']}' : ''}',
             style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+            overflow: TextOverflow.ellipsis,
           ),
         ])),
         const SizedBox(width: 8),
@@ -606,44 +728,60 @@ class _UserManagementPageState extends State<UserManagementPage> {
 
   // ── Modals ────────────────────────────────────────────────────────────────
 
+  void _dismissAllModals() {
+    setState(() {
+      _assignUser   = null;
+      _editUser     = null;
+      _deleteUser   = null;
+      _roleUser     = null;
+      _createBorrower = null;
+      _passwordUser = null;
+    });
+  }
+
   Widget _modalOverlay(String title, String subtitle, Widget formContent) {
     return GestureDetector(
-      onTap: () => setState(() {
-        _assignUser = null; _editUser = null;
-        _deleteUser = null; _roleUser = null; _createBorrower = null;
-      }),
+      onTap: _dismissAllModals,
       child: Container(
         color: const Color(0x80000000),
-        child: Center(
-          child: GestureDetector(
-            onTap: () {},
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              constraints: const BoxConstraints(maxWidth: 440),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Container(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                  decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6)))),
-                  child: Row(children: [
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1F2937))),
-                      if (subtitle.isNotEmpty) Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
-                    ])),
-                    GestureDetector(
-                      onTap: () => setState(() {
-                        _assignUser = null; _editUser = null;
-                        _deleteUser = null; _roleUser = null; _createBorrower = null;
-                      }),
-                      child: const Icon(Icons.close, size: 18, color: Color(0xFF9CA3AF)),
+        child: SafeArea(
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                constraints: const BoxConstraints(maxWidth: 440),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6)))),
+                    child: Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1F2937))),
+                        if (subtitle.isNotEmpty)
+                          Text(subtitle,
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                              overflow: TextOverflow.ellipsis),
+                      ])),
+                      GestureDetector(
+                        onTap: _dismissAllModals,
+                        child: const Icon(Icons.close, size: 18, color: Color(0xFF9CA3AF)),
+                      ),
+                    ]),
+                  ),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.65 -
+                          MediaQuery.of(context).viewInsets.bottom,
                     ),
-                  ]),
-                ),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-                  child: SingleChildScrollView(child: Padding(padding: const EdgeInsets.all(20), child: formContent)),
-                ),
-              ]),
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                      child: Padding(padding: const EdgeInsets.all(20), child: formContent),
+                    ),
+                  ),
+                ]),
+              ),
             ),
           ),
         ),
@@ -713,9 +851,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(_createBorrower!['borrower_name'] ?? '',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E3A8A))),
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E3A8A)),
+                overflow: TextOverflow.ellipsis),
             Text('ID #${_createBorrower!['borrower_id']}${_createBorrower!['rf_id'] != null ? ' · RF: ${_createBorrower!['rf_id']}' : ''}',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF3B82F6))),
+                style: const TextStyle(fontSize: 11, color: Color(0xFF3B82F6)),
+                overflow: TextOverflow.ellipsis),
           ])),
         ]),
       ),
@@ -739,6 +879,218 @@ class _UserManagementPageState extends State<UserManagementPage> {
               () { setState(() => _createBorrower = null); _createEmailCtrl.clear(); _createPassCtrl.clear(); _createConfirmCtrl.clear(); }),
     ]),
   );
+
+  // ── Admin: change password modal ──────────────────────────────────────────
+  Widget _buildChangePasswordModal() {
+    final user = _passwordUser!;
+    return GestureDetector(
+      onTap: _dismissAllModals,
+      child: Container(
+        color: const Color(0x80000000),
+        child: SafeArea(
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                constraints: const BoxConstraints(maxWidth: 440),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+
+                  // Header
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6)))),
+                    child: Row(children: [
+                      Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(color: const Color(0xFFF5F3FF), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.key_outlined, size: 18, color: Color(0xFF7C3AED)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('Reset Password',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1F2937))),
+                        Text('Set a new password for ${user['name']}',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                            overflow: TextOverflow.ellipsis),
+                      ])),
+                      GestureDetector(
+                        onTap: _dismissAllModals,
+                        child: const Icon(Icons.close, size: 18, color: Color(0xFF9CA3AF)),
+                      ),
+                    ]),
+                  ),
+
+                  // Body
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(context).size.height * 0.65 -
+                          MediaQuery.of(context).viewInsets.bottom,
+                    ),
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+                          // Warning banner
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFFBEB),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFFFDE68A)),
+                            ),
+                            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              const Icon(Icons.warning_amber_outlined, size: 15, color: Color(0xFFD97706)),
+                              const SizedBox(width: 8),
+                              Expanded(child: Text(
+                                'The user will need to use this new password to sign in. Consider informing them.',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+                              )),
+                            ]),
+                          ),
+
+                          // Server error banner
+                          if (_passServerError != null) ...[
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 16),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFEF2F2),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFFECACA)),
+                              ),
+                              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Icon(Icons.error_outline, size: 15, color: Color(0xFFEF4444)),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(_passServerError!,
+                                    style: const TextStyle(fontSize: 12, color: Color(0xFFB91C1C)))),
+                              ]),
+                            ),
+                          ],
+
+                          // New password field
+                          const Text('New Password',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: _newPassCtrl,
+                            obscureText: _newPassObscure,
+                            onChanged: (_) => setState(() { _passError = null; _passServerError = null; }),
+                            style: const TextStyle(fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: '••••••••',
+                              hintStyle: const TextStyle(color: Color(0xFFD1D5DB)),
+                              prefixIcon: const Icon(Icons.lock_outline, size: 16, color: Color(0xFF9CA3AF)),
+                              suffixIcon: GestureDetector(
+                                onTap: () => setState(() => _newPassObscure = !_newPassObscure),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  child: Text(_newPassObscure ? 'SHOW' : 'HIDE',
+                                      style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: _passError != null ? const Color(0xFFF87171) : const Color(0xFFE5E7EB))),
+                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF93C5FD))),
+                              filled: true, fillColor: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Confirm password field
+                          const Text('Confirm New Password',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: _confirmPassCtrl,
+                            obscureText: _confirmPassObscure,
+                            onChanged: (_) => setState(() { _passError = null; _passServerError = null; }),
+                            style: const TextStyle(fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: '••••••••',
+                              hintStyle: const TextStyle(color: Color(0xFFD1D5DB)),
+                              prefixIcon: const Icon(Icons.lock_outline, size: 16, color: Color(0xFF9CA3AF)),
+                              suffixIcon: GestureDetector(
+                                onTap: () => setState(() => _confirmPassObscure = !_confirmPassObscure),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  child: Text(_confirmPassObscure ? 'SHOW' : 'HIDE',
+                                      style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600)),
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: _passError != null ? const Color(0xFFF87171) : const Color(0xFFE5E7EB))),
+                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF93C5FD))),
+                              filled: true, fillColor: Colors.white,
+                            ),
+                          ),
+
+                          // Inline validation error
+                          if (_passError != null) ...[
+                            const SizedBox(height: 6),
+                            Row(children: [
+                              const Icon(Icons.error_outline, size: 13, color: Color(0xFFEF4444)),
+                              const SizedBox(width: 4),
+                              Expanded(child: Text(_passError!,
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFFEF4444)))),
+                            ]),
+                          ],
+
+                          const SizedBox(height: 8),
+                          // Password requirements hint
+                          const Text(
+                            'Min. 8 characters · 1 uppercase letter · 1 number',
+                            style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                          ),
+                          const SizedBox(height: 20),
+
+                          Row(children: [
+                            Expanded(child: ElevatedButton(
+                              onPressed: _passLoading ? null : _handleAdminChangePassword,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF7C3AED),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 13),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                elevation: 0,
+                              ),
+                              child: _passLoading
+                                  ? const SizedBox(width: 18, height: 18,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : const Text('Set New Password',
+                                      style: TextStyle(fontWeight: FontWeight.w600)),
+                            )),
+                            const SizedBox(width: 10),
+                            Expanded(child: OutlinedButton(
+                              onPressed: _dismissAllModals,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 13),
+                                side: const BorderSide(color: Color(0xFFE5E7EB)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+                            )),
+                          ]),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _field(String label, TextEditingController ctrl,
       {String hint = '', int maxLines = 1, TextInputType keyboardType = TextInputType.text, bool obscure = false}) {

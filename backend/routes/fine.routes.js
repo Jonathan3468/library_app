@@ -61,7 +61,8 @@ router.get("/outstanding", auth, requireLibrarian, async (req, res) => {
   }
 });
 
-// ── GET HISTORY ──────────────────────────────────────────────────────────────
+
+
 router.get("/history", auth, requireLibrarian, async (req, res) => {
   try {
     const paidIssues = await Issue.findAll({
@@ -77,7 +78,7 @@ router.get("/history", auth, requireLibrarian, async (req, res) => {
       where: { status: { [Op.in]: ["paid", "waived"] } },
       include: [
         { model: Borrower, attributes: ["borrower_id", "borrower_name", "rf_id"] },
-        { model: Copy, attributes: ["copy_id", "copy_code"], include: [{ model: Book, attributes: ["title"] }] },
+        { model: Copy, required: false, attributes: ["copy_id", "copy_code"], include: [{ model: Book, attributes: ["title"] }] },
       ],
       order: [["createdAt", "DESC"]],
     });
@@ -85,28 +86,39 @@ router.get("/history", auth, requireLibrarian, async (req, res) => {
     const history = [
       ...paidIssues.map(issue => ({
         id: issue.issue_id, type: "issue_fine",
-        borrower_id: issue.Borrower.borrower_id, borrower_name: issue.Borrower.borrower_name, rf_id: issue.Borrower.rf_id,
-        book_title: issue.Copy?.Book?.title, copy_code: issue.Copy?.copy_code,
+        borrower_id: issue.Borrower?.borrower_id,
+        borrower_name: issue.Borrower?.borrower_name || "Unknown",
+        rf_id: issue.Borrower?.rf_id,
+        book_title: issue.Copy?.Book?.title,
+        copy_code: issue.Copy?.copy_code,
         reason: "Late return", fine: issue.fine,
         payment_method: issue.payment_method || "cash",
         status: issue.waive_reason ? "waived" : "paid",
-        payment_date: issue.payment_date || issue.updatedAt, createdAt: issue.createdAt,
+        payment_date: issue.payment_date || issue.updatedAt,
+        createdAt: issue.createdAt,
       })),
       ...customFines.map(cf => ({
         id: cf.payment_id, type: "custom_fine",
-        borrower_id: cf.Borrower.borrower_id, borrower_name: cf.Borrower.borrower_name, rf_id: cf.Borrower.rf_id,
-        book_title: cf.Copy?.Book?.title || "N/A", copy_code: cf.Copy?.copy_code || "N/A",
+        borrower_id: cf.Borrower?.borrower_id,
+        borrower_name: cf.Borrower?.borrower_name || "Unknown",
+        rf_id: cf.Borrower?.rf_id,
+        book_title: cf.Copy?.Book?.title || "N/A",
+        copy_code: cf.Copy?.copy_code || "N/A",
         reason: cf.reason, amount: cf.amount,
-        payment_method: cf.payment_method, status: cf.status,
-        payment_date: cf.payment_date, createdAt: cf.createdAt,
+        payment_method: cf.payment_method,
+        status: cf.status,
+        payment_date: cf.payment_date,
+        createdAt: cf.createdAt,
       })),
     ].sort((a, b) => new Date(b.payment_date || b.createdAt) - new Date(a.payment_date || a.createdAt));
 
     res.json({ success: true, history });
   } catch (err) {
+    console.error("HISTORY ROUTE ERROR:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 
 // ── GET STATS ────────────────────────────────────────────────────────────────
 router.get("/stats", auth, requireLibrarian, async (req, res) => {
@@ -116,16 +128,26 @@ router.get("/stats", auth, requireLibrarian, async (req, res) => {
     const customCollected   = await FinePayment.sum("amount", { where: { status: "paid" } }) || 0;
     const totalOutstanding  = await Issue.sum("fine", { where: { fine_paid: false } }) || 0;
     const customOutstanding = await FinePayment.sum("amount", { where: { status: "pending" } }) || 0;
-    const issuesWithFines   = await Issue.count({ where: { fine: { [Op.gt]: 0 } } });
-    const customFinesCount  = await FinePayment.count();
+    const totalCustomAmount = await FinePayment.sum("amount") || 0;
+
+    const issuePaidCount         = await Issue.count({ where: { fine_paid: true, fine: { [Op.gt]: 0 } } });
+    const customPaidCount        = await FinePayment.count({ where: { status: "paid" } });
+    const issueOutstandingCount  = await Issue.count({ where: { fine_paid: false, fine: { [Op.gt]: 0 } } });
+    const customOutstandingCount = await FinePayment.count({ where: { status: "pending" } });
+    const issueFinesCount        = await Issue.count({ where: { fine: { [Op.gt]: 0 } } });
+    const customFinesCount       = await FinePayment.count();
 
     res.json({
       success: true,
       stats: {
-        total_fines_generated: Math.round(totalGenerated + await FinePayment.sum("amount") || 0),
+        total_fines_generated: Math.round(totalGenerated + totalCustomAmount),
         total_collected:       Math.round(totalCollected + customCollected),
         total_outstanding:     Math.round(totalOutstanding + customOutstanding),
-        issues_with_fines:     issuesWithFines + customFinesCount,
+        issues_with_fines:     issueFinesCount + customFinesCount,
+        paid_count:            issuePaidCount + customPaidCount,
+        outstanding_count:     issueOutstandingCount + customOutstandingCount,
+        issue_fines_count:     issueFinesCount,
+        custom_fines_count:    customFinesCount,
       },
     });
   } catch (err) {
@@ -133,7 +155,7 @@ router.get("/stats", auth, requireLibrarian, async (req, res) => {
   }
 });
 
-// ── GET SINGLE FINE ──────────────────────────────────────────────────────────
+// ── GET SINGLE FINE (issue fine) ─────────────────────────────────────────────
 router.get("/:id", auth, requireLibrarian, async (req, res) => {
   try {
     const fine = await Issue.findByPk(req.params.id, {
@@ -156,6 +178,8 @@ router.get("/:id", auth, requireLibrarian, async (req, res) => {
           waive_reason: fine.waive_reason, waived_date: fine.waived_date,
           status: fine.fine_paid ? (fine.waive_reason ? "waived" : "paid") : (isReturned ? "returned" : (isOverdue ? "not_returned" : "pending")),
           due_date: fine.due_date, check_in: fine.check_in,
+          // FIX: check_out was missing — needed by FineDetails date edit fields
+          check_out: fine.check_out,
         },
       });
     }
@@ -195,6 +219,114 @@ router.get("/custom/:id", auth, requireLibrarian, async (req, res) => {
   }
 });
 
+// ── UPDATE ISSUE FINE DATES ──────────────────────────────────────────────────
+// FIX: this route was missing — FineDetails.jsx calls PUT /fines/:id/dates
+router.put("/:id/dates", auth, requireLibrarian, async (req, res) => {
+  try {
+    const { due_date, check_in, check_out } = req.body;
+    const issue = await Issue.findByPk(req.params.id);
+    if (!issue) return res.status(404).json({ success: false, error: "Issue not found" });
+
+    const updates = {};
+    if (due_date  !== undefined) updates.due_date  = due_date  || null;
+    if (check_in  !== undefined) updates.check_in  = check_in  || null;
+    if (check_out !== undefined) updates.check_out = check_out || null;
+
+    await issue.update(updates);
+    return res.json({ success: true, message: "Dates updated successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── UPDATE ISSUE FINE REASON ─────────────────────────────────────────────────
+// FIX: this route was missing — FineDetails.jsx calls PUT /fines/:id/reason
+router.put("/:id/reason", auth, requireLibrarian, async (req, res) => {
+  try {
+    validateRequired(["reason"], req.body);
+    const issue = await Issue.findByPk(req.params.id);
+    if (!issue) return res.status(404).json({ success: false, error: "Issue not found" });
+    // Issues don't have a reason column — store in waive_reason if waived, otherwise no-op with success
+    // Adjust this if your Issue model has a dedicated reason/notes column
+    if (issue.waive_reason) {
+      await issue.update({ waive_reason: req.body.reason });
+    }
+    return res.json({ success: true, message: "Reason updated successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── UPDATE ISSUE FINE PAYMENT METHOD ────────────────────────────────────────
+// FIX: this route was missing — FineDetails.jsx calls PUT /fines/:id/payment-method
+router.put("/:id/payment-method", auth, requireLibrarian, async (req, res) => {
+  try {
+    validateRequired(["payment_method"], req.body);
+    const issue = await Issue.findByPk(req.params.id);
+    if (!issue) return res.status(404).json({ success: false, error: "Issue not found" });
+    await issue.update({ payment_method: req.body.payment_method });
+    return res.json({ success: true, message: "Payment method updated successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── MARK ISSUE FINE AS PAID ──────────────────────────────────────────────────
+// FIX: this route was missing — FineDetails.jsx calls POST /fines/:id/mark-paid
+router.post("/:id/mark-paid", auth, requireLibrarian, async (req, res) => {
+  try {
+    const issue = await Issue.findByPk(req.params.id, {
+      include: [{ model: Borrower, attributes: ["borrower_id", "borrower_name", "email", "rf_id"] }],
+    });
+    if (!issue) return res.status(404).json({ success: false, error: "Issue not found" });
+    if (issue.fine_paid) return res.status(400).json({ success: false, error: "Fine already paid" });
+
+    await issue.update({ fine_paid: true, payment_date: new Date() });
+
+    await log({
+      action: ACTIONS.FINE_PAID, user: req.user,
+      targetType: "FINE", targetId: issue.issue_id,
+      details: { borrower_name: issue.Borrower.borrower_name, amount: issue.fine, type: "issue_fine" },
+      ip: req.ip,
+    });
+
+    try {
+      await notifyFinePaid(issue.Borrower, {
+        amount: issue.fine, reason: "Late return", type: "late_return",
+        issue_id: issue.issue_id, payment_method: issue.payment_method || "cash", payment_date: new Date(),
+      });
+    } catch {}
+
+    return res.json({ success: true, message: "Fine marked as paid" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── WAIVE ISSUE FINE (from FineDetails page) ─────────────────────────────────
+router.post("/:id/waive", auth, requireLibrarian, async (req, res) => {
+  try {
+    validateRequired(["reason"], req.body);
+    const issue = await Issue.findByPk(req.params.id, {
+      include: [{ model: Borrower, attributes: ["borrower_id", "borrower_name", "email", "rf_id"] }],
+    });
+    if (!issue) return res.status(404).json({ success: false, error: "Issue not found" });
+
+    await issue.update({ fine: 0, fine_paid: true, waive_reason: req.body.reason, waived_date: new Date() });
+
+    await log({
+      action: ACTIONS.FINE_WAIVED, user: req.user,
+      targetType: "FINE", targetId: issue.issue_id,
+      details: { borrower_name: issue.Borrower.borrower_name, original_fine: issue.fine, waive_reason: req.body.reason, type: "issue_fine" },
+      ip: req.ip,
+    });
+
+    return res.json({ success: true, message: "Fine waived successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── UPDATE CUSTOM FINE REASON ────────────────────────────────────────────────
 router.put("/custom/:id/reason", auth, requireLibrarian, async (req, res) => {
   try {
@@ -221,36 +353,7 @@ router.put("/custom/:id/payment-method", auth, requireLibrarian, async (req, res
   }
 });
 
-// ── MARK CUSTOM FINE AS PAID ─────────────────────────────────────────────────
-router.post("/custom/:id/mark-paid", auth, requireLibrarian, async (req, res) => {
-  try {
-    const fine = await FinePayment.findByPk(req.params.id, {
-      include: [{ model: Borrower, attributes: ["borrower_id", "borrower_name", "email", "rf_id"] }],
-    });
-    if (!fine) return res.status(404).json({ success: false, error: "Fine not found" });
-    if (fine.status === "paid") return res.status(400).json({ success: false, error: "Fine already paid" });
 
-    await fine.update({ status: "paid", payment_date: new Date() });
-
-    await log({
-      action: ACTIONS.FINE_PAID, user: req.user,
-      targetType: "FINE", targetId: `CF-${fine.payment_id}`,
-      details: { borrower_name: fine.Borrower.borrower_name, amount: fine.amount, reason: fine.reason, type: "custom_fine" },
-      ip: req.ip,
-    });
-
-    try {
-      await notifyFinePaid(fine.Borrower, {
-        amount: fine.amount, reason: fine.reason, type: "custom_fine",
-        payment_id: fine.payment_id, payment_method: fine.payment_method || "cash", payment_date: new Date(),
-      });
-    } catch {}
-
-    return res.json({ success: true, message: "Fine marked as paid" });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // ── WAIVE CUSTOM FINE ────────────────────────────────────────────────────────
 router.post("/custom/:id/waive", auth, requireLibrarian, async (req, res) => {
@@ -399,6 +502,83 @@ router.post("/waive/:issue_id", auth, requireLibrarian, async (req, res) => {
   }
 });
 
+// ── MARK CUSTOM FINE AS PAID ─────────────────────────────────────────────────
+router.post("/custom/:id/mark-paid", auth, requireLibrarian, async (req, res) => {
+  try {
+    const fine = await FinePayment.findByPk(req.params.id, {
+      include: [{ model: Borrower, attributes: ["borrower_id", "borrower_name", "email", "rf_id"] }],
+    });
+    if (!fine) return res.status(404).json({ success: false, error: "Fine not found" });
+    if (fine.status === "paid") return res.status(400).json({ success: false, error: "Fine already paid" });
+
+    await fine.update({ status: "paid", payment_date: new Date() });
+
+    await log({
+      action: ACTIONS.FINE_PAID, user: req.user,
+      targetType: "FINE", targetId: `CF-${fine.payment_id}`,
+      details: { borrower_name: fine.Borrower.borrower_name, amount: fine.amount, reason: fine.reason, type: "custom_fine" },
+      ip: req.ip,
+    });
+
+    try {
+      await notifyFinePaid(fine.Borrower, {
+        amount: fine.amount, reason: fine.reason, type: "custom_fine",
+        payment_id: fine.payment_id, payment_method: fine.payment_method || "cash", payment_date: new Date(),
+      });
+    } catch {}
+
+    return res.json({ success: true, message: "Fine marked as paid" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+// ── RECALCULATE ALL ───────────────────────────────────────────────────────────
+// NOTE: Must be defined BEFORE /:id/recalculate to avoid Express matching
+//       "recalculate-all" as the :id param.
+router.post("/recalculate-all", auth, requireLibrarian, async (req, res) => {
+  try {
+    const { mode = "all" } = req.body;
+    const validModes = ["all", "returned", "overdue"];
+    if (!validModes.includes(mode)) return res.status(400).json({ success: false, error: `Invalid mode. Must be: ${validModes.join(", ")}` });
+
+    const FINE_PER_DAY = getSetting("FINE_PER_DAY");
+    let recalculated = 0, totalAdjustment = 0, returnedCount = 0, overdueCount = 0;
+
+    if (mode === "all" || mode === "returned") {
+      const returned = await Issue.findAll({ where: { status: "returned", check_in: { [Op.ne]: null } } });
+      for (const issue of returned) {
+        const due = new Date(issue.due_date);
+        const ret = new Date(issue.check_in);
+        const newFine = ret > due ? Math.ceil((ret - due) / (1000 * 60 * 60 * 24)) * FINE_PER_DAY : 0;
+        if (newFine !== issue.fine) { totalAdjustment += (newFine - issue.fine); await issue.update({ fine: newFine }); recalculated++; }
+        returnedCount++;
+      }
+    }
+
+    if (mode === "all" || mode === "overdue") {
+      const overdue = await Issue.findAll({ where: { status: "issued", check_in: null, due_date: { [Op.lt]: new Date() } } });
+      const today = new Date();
+      for (const issue of overdue) {
+        const due = new Date(issue.due_date);
+        const newFine = today > due ? Math.ceil((today - due) / (1000 * 60 * 60 * 24)) * FINE_PER_DAY : 0;
+        if (newFine !== issue.fine) { totalAdjustment += (newFine - issue.fine); await issue.update({ fine: newFine }); recalculated++; }
+        overdueCount++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Recalculated ${recalculated} fines (${returnedCount} returned, ${overdueCount} overdue)`,
+      recalculated_count: recalculated, total_adjustment: totalAdjustment,
+      returned_books: returnedCount, overdue_books: overdueCount,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── ADD CUSTOM FINE ──────────────────────────────────────────────────────────
 router.post("/custom", auth, requireLibrarian, async (req, res) => {
   try {
@@ -458,16 +638,20 @@ router.post("/custom", auth, requireLibrarian, async (req, res) => {
   }
 });
 
-// ── RECALCULATE FINE ─────────────────────────────────────────────────────────
+
+
+
+
+// ── RECALCULATE SINGLE FINE ───────────────────────────────────────────────────
 router.post("/:id/recalculate", auth, requireLibrarian, async (req, res) => {
   try {
     const issue = await Issue.findByPk(req.params.id);
     if (!issue) return res.status(404).json({ success: false, error: "Issue not found" });
 
-    const FINE_PER_DAY  = getSetting("FINE_PER_DAY");
-    const due           = new Date(issue.due_date);
-    const oldFine       = issue.fine;
-    const compareDate   = issue.check_in ? new Date(issue.check_in) : new Date();
+    const FINE_PER_DAY = getSetting("FINE_PER_DAY");
+    const due          = new Date(issue.due_date);
+    const oldFine      = issue.fine;
+    const compareDate  = issue.check_in ? new Date(issue.check_in) : new Date();
     let newFine = 0;
     if (compareDate > due) {
       newFine = Math.ceil((compareDate - due) / (1000 * 60 * 60 * 24)) * FINE_PER_DAY;
@@ -479,49 +663,6 @@ router.post("/:id/recalculate", auth, requireLibrarian, async (req, res) => {
       success: true, message: "Fine recalculated successfully",
       old_fine: oldFine, new_fine: newFine,
       days_late: newFine > 0 ? Math.ceil((compareDate - due) / (1000 * 60 * 60 * 24)) : 0,
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── RECALCULATE ALL ───────────────────────────────────────────────────────────
-router.post("/recalculate-all", auth, requireLibrarian, async (req, res) => {
-  try {
-    const { mode = "all" } = req.body;
-    const validModes = ["all", "returned", "overdue"];
-    if (!validModes.includes(mode)) return res.status(400).json({ success: false, error: `Invalid mode. Must be: ${validModes.join(", ")}` });
-
-    const FINE_PER_DAY = getSetting("FINE_PER_DAY");
-    let recalculated = 0, totalAdjustment = 0, returnedCount = 0, overdueCount = 0;
-
-    if (mode === "all" || mode === "returned") {
-      const returned = await Issue.findAll({ where: { status: "returned", check_in: { [Op.ne]: null } } });
-      for (const issue of returned) {
-        const due = new Date(issue.due_date);
-        const ret = new Date(issue.check_in);
-        const newFine = ret > due ? Math.ceil((ret - due) / (1000 * 60 * 60 * 24)) * FINE_PER_DAY : 0;
-        if (newFine !== issue.fine) { totalAdjustment += (newFine - issue.fine); await issue.update({ fine: newFine }); recalculated++; }
-        returnedCount++;
-      }
-    }
-
-    if (mode === "all" || mode === "overdue") {
-      const overdue = await Issue.findAll({ where: { status: "issued", check_in: null, due_date: { [Op.lt]: new Date() } } });
-      const today = new Date();
-      for (const issue of overdue) {
-        const due = new Date(issue.due_date);
-        const newFine = today > due ? Math.ceil((today - due) / (1000 * 60 * 60 * 24)) * FINE_PER_DAY : 0;
-        if (newFine !== issue.fine) { totalAdjustment += (newFine - issue.fine); await issue.update({ fine: newFine }); recalculated++; }
-        overdueCount++;
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `Recalculated ${recalculated} fines (${returnedCount} returned, ${overdueCount} overdue)`,
-      recalculated_count: recalculated, total_adjustment: totalAdjustment,
-      returned_books: returnedCount, overdue_books: overdueCount,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

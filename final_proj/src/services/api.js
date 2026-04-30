@@ -9,11 +9,9 @@ const API = axios.create({
 API.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
-
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-
     return config;
   },
   (error) => Promise.reject(error)
@@ -23,24 +21,18 @@ API.interceptors.request.use(
 API.interceptors.response.use(
   (response) => {
     const method = response.config.method;
-
-    // ✅ Only show success popup for POST, PUT, DELETE
-    if (
-      ["post", "put", "delete"].includes(method) &&
-      response.data?.message
-    ) {
+    if (["post", "put", "delete"].includes(method) && response.data?.message) {
       toast.success(response.data.message);
     }
-
     return response;
   },
   (error) => {
     const method = error.config?.method;
     const url = error.config?.url || "";
 
-    // 🔐 Handle Unauthorized — but skip routes that use 401 for validation
+    // 🔐 Handle Unauthorized
     if (error.response?.status === 401) {
-      const skipLogoutRoutes = ["/auth/change-password"];
+      const skipLogoutRoutes = ["/auth/change-password", "/auth/login", "/auth/register"];
       const shouldLogout = !skipLogoutRoutes.some((route) => url.includes(route));
 
       if (shouldLogout) {
@@ -51,10 +43,12 @@ API.interceptors.response.use(
       }
     }
 
-    // ❌ Show error popup only for POST, PUT, DELETE
-    if (["post", "put", "delete"].includes(method)) {
-      const message =
-        error.response?.data?.message || "Something went wrong";
+    // ❌ Show error toast only for POST, PUT, DELETE — and skip auth routes (handled inline)
+    const skipToastRoutes = ["/auth/login", "/auth/register"];
+    const shouldShowToast = !skipToastRoutes.some((route) => url.includes(route));
+
+    if (["post", "put", "delete"].includes(method) && shouldShowToast) {
+      const message = error.response?.data?.message || "Something went wrong";
       toast.error(message);
     }
 

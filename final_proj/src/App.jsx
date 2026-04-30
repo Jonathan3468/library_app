@@ -20,22 +20,18 @@ import ScanAndRenew from "./pages/ScanAndRenew";
 import Borrowers from "./pages/Borrowers";
 import BorrowerDetails from "./pages/BorrowerDetails";
 import AddBorrower from "./pages/AddBorrower";
-
 import Books from "./pages/Books";
 import bookRoutes from "./routes/bookRoutes";
-
 import Authors from "./pages/Authors";
 import AddAuthor from "./pages/AddAuthor";
 import AuthorDetails from "./pages/AuthorDetails";
-
 import Issues from "./pages/Issues";
+import IssueStats from "./pages/IssueStats";   // NEW
 import Notifications from "./pages/Notifications";
 import Fines from "./pages/Fines";
-
 import Search from "./pages/Search";
 import PopularBooks from "./pages/PopularBooks";
 import CustomFineDetails from "./components/CustomFineDetails";
-
 import AuthPage from "./pages/AuthPage";
 
 function App() {
@@ -69,8 +65,22 @@ function App() {
 
       <Routes>
         {/* Public */}
-        <Route path="/login" element={<AuthPage />} />
-        <Route path="/register" element={<AuthPage />} />
+        <Route
+          path="/login"
+          element={
+            localStorage.getItem("token")
+              ? <Navigate to="/dashboard" replace />
+              : <AuthPage />
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            localStorage.getItem("token")
+              ? <Navigate to="/dashboard" replace />
+              : <AuthPage />
+          }
+        />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         {/* Protected Layout */}
@@ -193,6 +203,16 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* Reports — stats MUST come before :id to avoid param collision */}
+          <Route
+            path="reports/stats"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "librarian"]}>
+                <IssueStats />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="reports"
             element={
@@ -201,6 +221,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="notifications"
             element={
@@ -227,7 +248,6 @@ function App() {
               </ProtectedRoute>
             }
           />
-
           <Route
             path="/audits"
             element={

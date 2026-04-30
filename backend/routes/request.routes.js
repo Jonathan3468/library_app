@@ -5,6 +5,14 @@ const { Op } = require("sequelize");
 const { auth } = require("../middleware/auth.middleware");
 const { sendRequestCancelledEmail } = require("../services/notificationService");
 const { getSetting } = require("../config/librarySettings");
+
+const expireStaleRequests = async () => {
+  await Request.update(
+    { status: "expired" },
+    { where: { status: "pending", expiry_date: { [Op.lt]: new Date() } } }
+  );
+};
+
 // =====================================================
 // CREATE REQUEST
 // =====================================================
@@ -101,6 +109,7 @@ router.post("/", async (req, res) => {
 // =====================================================
 router.post("/:id/fulfill", async (req, res) => {
   try {
+    await expireStaleRequests();
     const request = await Request.findByPk(req.params.id, {
       include: [
         { model: Borrower },
@@ -159,6 +168,7 @@ router.get("/", async (req, res) => {
   try {
     const { status, borrower_id } = req.query;
 
+    await expireStaleRequests();
     const where = {};
     if (status) where.status = status;
     if (borrower_id) where.borrower_id = borrower_id;
@@ -299,6 +309,7 @@ router.delete("/:id", auth, async (req, res) => {
 // =====================================================
 router.post("/my-requests", async (req, res) => {
   try {
+    await expireStaleRequests();
     const { rf_id } = req.body;
 
     const borrower = await Borrower.findOne({ where: { rf_id } });

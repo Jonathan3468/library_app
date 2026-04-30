@@ -1,3 +1,4 @@
+//auth.routes.js
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcrypt");
@@ -273,6 +274,48 @@ router.delete("/users/:id", auth, requireAdmin, async (req, res) => {
   }
 });
 
+// ================= ADMIN: CHANGE ANOTHER USER'S PASSWORD (Admin only) =================
+router.put("/users/:id/password", auth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { new_password } = req.body;
+
+    if (!new_password) {
+      return res.status(400).json({ error: "New password is required" });
+    }
+    if (new_password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
+    }
+
+    const user = await User.findByPk(id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (user.id === req.user.id) {
+      return res.status(400).json({ error: "Use the change-password endpoint to update your own password" });
+    }
+    if (user.role === "admin") {
+      return res.status(403).json({ error: "Cannot reset another admin's password" });
+    }
+
+    const hashedPassword = await bcrypt.hash(new_password, 10);
+    await user.update({ password: hashedPassword });
+
+    await log({
+      action:     ACTIONS.PASSWORD_RESET,
+      user:       req.user,
+      targetType: "USER",
+      targetId:   user.id,
+      details:    { name: user.name, email: user.email, method: "admin_reset" },
+      ip:         req.ip,
+    });
+
+    res.json({ success: true, message: `Password updated for ${user.name}` });
+
+  } catch (err) {
+    console.error("ADMIN CHANGE PASSWORD ERROR:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // ================= CHANGE PASSWORD =================
 router.put("/change-password", auth, async (req, res) => {
   try {
@@ -322,7 +365,7 @@ router.post("/forgot-password", async (req, res) => {
     if (!user) return res.status(404).json({ error: "No account found with that email address." });
 
     const token  = crypto.randomBytes(32).toString("hex");
-    const otp    = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit for mobile
+    const otp    = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     await user.update({ reset_token: token, reset_otp: otp, reset_token_expiry: expiry });

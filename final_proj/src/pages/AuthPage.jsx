@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { updateStoredUser } from "../utils/auth";
@@ -38,7 +38,27 @@ const validators = {
 
 function FieldError({ msg }) {
   if (!msg) return null;
-  return <p className="mt-1 text-xs text-red-500">{msg}</p>;
+  return (
+    <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+      <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+      </svg>
+      {msg}
+    </p>
+  );
+}
+
+function ServerError({ msg }) {
+  if (!msg) return null;
+  return (
+    <div className="mb-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2.5">
+      <svg className="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+      </svg>
+      <p className="text-xs text-red-600">{msg}</p>
+    </div>
+  );
 }
 
 function InputField({ label, type = "text", value, onChange, onBlur, error, placeholder, autoComplete }) {
@@ -56,7 +76,7 @@ function InputField({ label, type = "text", value, onChange, onBlur, error, plac
           placeholder={placeholder}
           autoComplete={autoComplete}
           className={`w-full border ${
-            error ? "border-red-400" : "border-gray-300"
+            error ? "border-red-400 bg-red-50" : "border-gray-300"
           } rounded px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 ${
             error ? "focus:ring-red-200" : "focus:ring-blue-200"
           } transition-all`}
@@ -92,7 +112,12 @@ function PasswordStrength({ password }) {
     <div className="mb-4 -mt-2">
       <div className="flex gap-1 mb-1">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className={`h-1 flex-1 rounded-full transition-all duration-300 ${i <= score ? colors[score] : "bg-gray-200"}`} />
+          <div
+            key={i}
+            className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+              i <= score ? colors[score] : "bg-gray-200"
+            }`}
+          />
         ))}
       </div>
       <p className="text-xs text-gray-400">{score > 0 ? labels[score] : ""}</p>
@@ -102,9 +127,9 @@ function PasswordStrength({ password }) {
 
 // ─── Role selector ─────────────────────────────────────────────────────────────
 const ROLES = [
-  { value: "member", label: "Member", desc: "Browse & borrow books" },
+  { value: "member",    label: "Member",    desc: "Browse & borrow books" },
   { value: "librarian", label: "Librarian", desc: "Manage library operations" },
-  { value: "admin", label: "Admin", desc: "Full system access" },
+  { value: "admin",     label: "Admin",     desc: "Full system access" },
 ];
 
 function RoleSelector({ value, onChange }) {
@@ -118,10 +143,14 @@ function RoleSelector({ value, onChange }) {
             type="button"
             onClick={() => onChange(r.value)}
             className={`rounded border p-2.5 text-left transition-all ${
-              value === r.value ? "border-blue-500 bg-blue-50 ring-1 ring-blue-300" : "border-gray-300 bg-white hover:border-gray-400"
+              value === r.value
+                ? "border-blue-500 bg-blue-50 ring-1 ring-blue-300"
+                : "border-gray-300 bg-white hover:border-gray-400"
             }`}
           >
-            <p className={`text-xs font-bold ${value === r.value ? "text-blue-600" : "text-gray-700"}`}>{r.label}</p>
+            <p className={`text-xs font-bold ${value === r.value ? "text-blue-600" : "text-gray-700"}`}>
+              {r.label}
+            </p>
             <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{r.desc}</p>
           </button>
         ))}
@@ -130,28 +159,62 @@ function RoleSelector({ value, onChange }) {
   );
 }
 
+// ─── Empty state initializers ──────────────────────────────────────────────────
+const EMPTY_LOGIN = { email: "", password: "" };
+const EMPTY_REG   = { name: "", email: "", password: "", confirmPassword: "", role: "member", roleCode: "" };
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState("login"); // "login" | "register" | "forgot"
+  const [mode, setMode]       = useState("login"); // "login" | "register" | "forgot"
   const [loading, setLoading] = useState(false);
 
-  // Login
-  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
-  const [loginErrors, setLoginErrors] = useState({});
-  const [loginTouched, setLoginTouched] = useState({});
+  // ── Clear session on mount ───────────────────────────────────────────────────
+  useEffect(() => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    delete API.defaults.headers.common["Authorization"];
+  }, []);
 
-  // Register
-  const [regForm, setRegForm] = useState({ name: "", email: "", password: "", confirmPassword: "", role: "member", roleCode: "" });
-  const [regErrors, setRegErrors] = useState({});
-  const [regTouched, setRegTouched] = useState({});
+  // ── Login state ──────────────────────────────────────────────────────────────
+  const [loginForm,        setLoginForm]        = useState(EMPTY_LOGIN);
+  const [loginErrors,      setLoginErrors]      = useState({});
+  const [loginTouched,     setLoginTouched]     = useState({});
+  const [loginServerError, setLoginServerError] = useState("");
 
-  // Forgot password
-  const [forgotEmail, setForgotEmail] = useState("");
+  // ── Register state ───────────────────────────────────────────────────────────
+  const [regForm,        setRegForm]        = useState(EMPTY_REG);
+  const [regErrors,      setRegErrors]      = useState({});
+  const [regTouched,     setRegTouched]     = useState({});
+  const [regServerError, setRegServerError] = useState("");
 
-  // ── Login ───────────────────────────────────────────────────────────────────
+  // ── Forgot password state ────────────────────────────────────────────────────
+  const [forgotEmail,       setForgotEmail]       = useState("");
+  const [forgotEmailError,  setForgotEmailError]  = useState("");
+  const [forgotEmailTouched, setForgotEmailTouched] = useState(false);
+
+  // ── Reset all state when switching modes ─────────────────────────────────────
+  const switchMode = (next) => {
+    setMode(next);
+    // Reset login
+    setLoginForm(EMPTY_LOGIN);
+    setLoginErrors({});
+    setLoginTouched({});
+    setLoginServerError("");
+    // Reset register
+    setRegForm(EMPTY_REG);
+    setRegErrors({});
+    setRegTouched({});
+    setRegServerError("");
+    // Reset forgot
+    setForgotEmail("");
+    setForgotEmailError("");
+    setForgotEmailTouched(false);
+  };
+
+  // ── Login ────────────────────────────────────────────────────────────────────
   const validateLogin = (form) => ({
-    email: validators.email(form.email),
+    email:    validators.email(form.email),
     password: form.password ? null : "Password is required.",
   });
 
@@ -163,7 +226,10 @@ export default function AuthPage() {
   const handleLoginChange = (field, value) => {
     const updated = { ...loginForm, [field]: value };
     setLoginForm(updated);
-    if (loginTouched[field]) setLoginErrors((e) => ({ ...e, [field]: validateLogin(updated)[field] }));
+    setLoginServerError("");
+    if (loginTouched[field]) {
+      setLoginErrors((e) => ({ ...e, [field]: validateLogin(updated)[field] }));
+    }
   };
 
   const handleLogin = async (e) => {
@@ -171,6 +237,7 @@ export default function AuthPage() {
     const errs = validateLogin(loginForm);
     setLoginErrors(errs);
     setLoginTouched({ email: true, password: true });
+    setLoginServerError("");
     if (Object.values(errs).some(Boolean)) return;
 
     setLoading(true);
@@ -179,22 +246,22 @@ export default function AuthPage() {
       localStorage.setItem("token", data.token);
       updateStoredUser(data.user);
       API.defaults.headers.common["Authorization"] = `Bearer ${data.token}`;
-    //   toast.success("Welcome back!");
       navigate("/dashboard");
     } catch (err) {
-    //   toast.error(err.response?.data?.error || "Login failed. Check your credentials.");
+      const msg = err.response?.data?.error || "Incorrect email or password. Please try again.";
+      setLoginServerError(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Register ────────────────────────────────────────────────────────────────
+  // ── Register ─────────────────────────────────────────────────────────────────
   const validateRegister = (form) => ({
-    name: validators.name(form.name),
-    email: validators.email(form.email),
-    password: validators.password(form.password),
+    name:            validators.name(form.name),
+    email:           validators.email(form.email),
+    password:        validators.password(form.password),
     confirmPassword: validators.confirmPassword(form.confirmPassword, form.password),
-    roleCode: validators.roleCode(form.roleCode, form.role),
+    roleCode:        validators.roleCode(form.roleCode, form.role),
   });
 
   const handleRegBlur = (field) => {
@@ -204,9 +271,17 @@ export default function AuthPage() {
 
   const handleRegChange = (field, value) => {
     const updated = { ...regForm, [field]: value };
-    if (field === "role") updated.roleCode = "";
+    // Clear roleCode when switching to member
+    if (field === "role") {
+      updated.roleCode = "";
+      setRegErrors((e) => ({ ...e, roleCode: null }));
+      setRegTouched((t) => ({ ...t, roleCode: false }));
+    }
     setRegForm(updated);
-    if (regTouched[field]) setRegErrors((e) => ({ ...e, [field]: validateRegister(updated)[field] }));
+    setRegServerError("");
+    if (regTouched[field]) {
+      setRegErrors((e) => ({ ...e, [field]: validateRegister(updated)[field] }));
+    }
   };
 
   const handleRegister = async (e) => {
@@ -214,45 +289,60 @@ export default function AuthPage() {
     const errs = validateRegister(regForm);
     setRegErrors(errs);
     setRegTouched({ name: true, email: true, password: true, confirmPassword: true, roleCode: true });
+    setRegServerError("");
     if (Object.values(errs).some(Boolean)) return;
 
     setLoading(true);
     try {
       await API.post("/auth/register", {
-        name: regForm.name,
-        email: regForm.email,
+        name:     regForm.name,
+        email:    regForm.email,
         password: regForm.password,
-        role: regForm.role,
+        role:     regForm.role,
         roleCode: regForm.roleCode,
       });
-    //   toast.success("Account created! Please log in.");
-      setMode("login");
+      toast.success("Account created! Please sign in.");
+      switchMode("login");
     } catch (err) {
-      const msg = err.response?.data?.error || err.response?.data?.message || "Registration failed.";
-    //   toast.error(msg);
+      const msg = err.response?.data?.error || "Registration failed. Please try again.";
+      setRegServerError(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Forgot Password ─────────────────────────────────────────────────────────
+  // ── Forgot Password ──────────────────────────────────────────────────────────
+  const handleForgotBlur = () => {
+    setForgotEmailTouched(true);
+    setForgotEmailError(validators.email(forgotEmail));
+  };
+
+  const handleForgotChange = (value) => {
+    setForgotEmail(value);
+    if (forgotEmailTouched) setForgotEmailError(validators.email(value));
+  };
+
   const handleForgotPassword = async (e) => {
     e.preventDefault();
-    if (!forgotEmail.trim()) return toast.error("Please enter your email.");
+    const err = validators.email(forgotEmail);
+    setForgotEmailError(err);
+    setForgotEmailTouched(true);
+    if (err) return;
+
     setLoading(true);
     try {
       await API.post("/auth/forgot-password", { email: forgotEmail });
-    //   toast.success("If that email exists, a reset link was sent.");
-      setForgotEmail("");
-      setMode("login");
+      toast.success("Reset link sent! Check your inbox.");
+      switchMode("login");
     } catch (err) {
-    //   toast.error("Something went wrong. Please try again.");
+      const msg = err.response?.data?.error || "Could not send reset link. Please try again.";
+      setForgotEmailError(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -262,16 +352,18 @@ export default function AuthPage() {
         </div>
 
         <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          {/* Tabs — only show for login and register */}
+          {/* Tabs */}
           {mode !== "forgot" && (
             <div className="flex border-b border-gray-200">
               {["login", "register"].map((m) => (
                 <button
                   key={m}
                   type="button"
-                  onClick={() => setMode(m)}
+                  onClick={() => switchMode(m)}
                   className={`flex-1 py-3 text-sm font-semibold transition-all ${
-                    mode === m ? "text-blue-600 border-b-2 border-blue-600 -mb-px bg-white" : "text-gray-400 hover:text-gray-600 bg-gray-50"
+                    mode === m
+                      ? "text-blue-600 border-b-2 border-blue-600 -mb-px bg-white"
+                      : "text-gray-400 hover:text-gray-600 bg-gray-50"
                   }`}
                 >
                   {m === "login" ? "Sign In" : "Register"}
@@ -281,6 +373,7 @@ export default function AuthPage() {
           )}
 
           <div className="p-8">
+
             {/* ── Login Form ── */}
             {mode === "login" && (
               <form onSubmit={handleLogin} noValidate>
@@ -290,7 +383,7 @@ export default function AuthPage() {
                   value={loginForm.email}
                   onChange={(e) => handleLoginChange("email", e.target.value)}
                   onBlur={() => handleLoginBlur("email")}
-                  error={loginTouched.email && loginErrors.email}
+                  error={loginTouched.email ? loginErrors.email : null}
                   placeholder="you@example.com"
                   autoComplete="email"
                 />
@@ -300,26 +393,26 @@ export default function AuthPage() {
                   value={loginForm.password}
                   onChange={(e) => handleLoginChange("password", e.target.value)}
                   onBlur={() => handleLoginBlur("password")}
-                  error={loginTouched.password && loginErrors.password}
+                  error={loginTouched.password ? loginErrors.password : null}
                   placeholder="••••••••"
                   autoComplete="current-password"
                 />
-                {/* Forgot password link */}
                 <div className="flex justify-end -mt-2 mb-4">
                   <button
                     type="button"
-                    onClick={() => setMode("forgot")}
+                    onClick={() => switchMode("forgot")}
                     className="text-xs text-blue-500 hover:underline"
                   >
                     Forgot password?
                   </button>
                 </div>
+                <ServerError msg={loginServerError} />
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 font-medium text-sm transition-all"
+                  className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium text-sm transition-all"
                 >
-                  {loading ? "Logging in..." : "Login"}
+                  {loading ? "Logging in…" : "Login"}
                 </button>
               </form>
             )}
@@ -332,7 +425,7 @@ export default function AuthPage() {
                   value={regForm.name}
                   onChange={(e) => handleRegChange("name", e.target.value)}
                   onBlur={() => handleRegBlur("name")}
-                  error={regTouched.name && regErrors.name}
+                  error={regTouched.name ? regErrors.name : null}
                   placeholder="Jane Smith"
                   autoComplete="name"
                 />
@@ -342,7 +435,7 @@ export default function AuthPage() {
                   value={regForm.email}
                   onChange={(e) => handleRegChange("email", e.target.value)}
                   onBlur={() => handleRegBlur("email")}
-                  error={regTouched.email && regErrors.email}
+                  error={regTouched.email ? regErrors.email : null}
                   placeholder="you@example.com"
                   autoComplete="email"
                 />
@@ -352,7 +445,7 @@ export default function AuthPage() {
                   value={regForm.password}
                   onChange={(e) => handleRegChange("password", e.target.value)}
                   onBlur={() => handleRegBlur("password")}
-                  error={regTouched.password && regErrors.password}
+                  error={regTouched.password ? regErrors.password : null}
                   placeholder="••••••••"
                   autoComplete="new-password"
                 />
@@ -363,7 +456,7 @@ export default function AuthPage() {
                   value={regForm.confirmPassword}
                   onChange={(e) => handleRegChange("confirmPassword", e.target.value)}
                   onBlur={() => handleRegBlur("confirmPassword")}
-                  error={regTouched.confirmPassword && regErrors.confirmPassword}
+                  error={regTouched.confirmPassword ? regErrors.confirmPassword : null}
                   placeholder="••••••••"
                   autoComplete="new-password"
                 />
@@ -383,15 +476,16 @@ export default function AuthPage() {
                       value={regForm.roleCode}
                       onChange={(e) => handleRegChange("roleCode", e.target.value)}
                       onBlur={() => handleRegBlur("roleCode")}
-                      error={regTouched.roleCode && regErrors.roleCode}
+                      error={regTouched.roleCode ? regErrors.roleCode : null}
                       placeholder="Enter your access code"
                     />
                   </div>
                 )}
+                <ServerError msg={regServerError} />
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 font-medium text-sm transition-all"
+                  className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium text-sm transition-all"
                 >
                   {loading ? "Creating account…" : "Create Account"}
                 </button>
@@ -409,20 +503,22 @@ export default function AuthPage() {
                   label="Email"
                   type="email"
                   value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
+                  onChange={(e) => handleForgotChange(e.target.value)}
+                  onBlur={handleForgotBlur}
+                  error={forgotEmailTouched ? forgotEmailError : null}
                   placeholder="you@example.com"
                   autoComplete="email"
                 />
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 font-medium text-sm transition-all"
+                  className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-medium text-sm transition-all"
                 >
-                  {loading ? "Sending..." : "Send Reset Link"}
+                  {loading ? "Sending…" : "Send Reset Link"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMode("login")}
+                  onClick={() => switchMode("login")}
                   className="w-full mt-3 text-xs text-gray-400 hover:text-gray-600"
                 >
                   ← Back to login

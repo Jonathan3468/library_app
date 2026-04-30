@@ -65,9 +65,13 @@ class _BorrowersPageState extends State<BorrowersPage> {
     setState(() => _loading = true);
     try {
       final res = await ApiService.get('/borrowers');
-      setState(() => _borrowers = res.data is List ? res.data : []);
+      if (mounted) {
+        setState(() => _borrowers = res.data is List ? res.data : []);
+      }
     } catch (_) {
-      setState(() => _error = 'Failed to load borrowers');
+      if (mounted) {
+        setState(() => _error = 'Failed to load borrowers');
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -118,7 +122,8 @@ class _BorrowersPageState extends State<BorrowersPage> {
       (_membershipFilter != 'all' ? 1 : 0) + (_rfidFilter != 'all' ? 1 : 0);
 
   Future<void> _updateBorrower() async {
-    if (_editingBorrower == null) return;
+    if (_editingBorrower == null || !mounted) return;
+    
     try {
       await ApiService.put('/borrowers/${_editingBorrower!['borrower_id']}', data: {
         'borrower_name': _editNameCtrl.text,
@@ -127,12 +132,23 @@ class _BorrowersPageState extends State<BorrowersPage> {
         'address': _editAddressCtrl.text,
         'rf_id': _editRfCtrl.text,
       });
-      if (mounted) { Navigator.of(context).pop(); setState(() => _editingBorrower = null); }
-      _fetchBorrowers();
-    } catch (_) {}
+      if (mounted) {
+        Navigator.of(context).pop();
+        setState(() => _editingBorrower = null);
+        _fetchBorrowers();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update borrower')),
+        );
+      }
+    }
   }
 
   Future<void> _renewMembership(dynamic borrower) async {
+    if (!mounted) return;
+    
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -149,12 +165,30 @@ class _BorrowersPageState extends State<BorrowersPage> {
         ],
       ),
     );
-    if (confirmed == true) {
-      try { await ApiService.put('/borrowers/renew/${borrower['borrower_id']}'); _fetchBorrowers(); } catch (_) {}
+    
+    if (!mounted) return;
+    if (confirmed != true) return;
+    
+    try {
+      await ApiService.put('/borrowers/renew/${borrower['borrower_id']}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Membership renewed successfully')),
+        );
+        _fetchBorrowers();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to renew membership')),
+        );
+      }
     }
   }
 
   Future<void> _deleteBorrower(dynamic borrower) async {
+    if (!mounted) return;
+    
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -171,8 +205,24 @@ class _BorrowersPageState extends State<BorrowersPage> {
         ],
       ),
     );
-    if (confirmed == true) {
-      try { await ApiService.delete('/borrowers/${borrower['borrower_id']}'); _fetchBorrowers(); } catch (_) {}
+    
+    if (!mounted) return;
+    if (confirmed != true) return;
+    
+    try {
+      await ApiService.delete('/borrowers/${borrower['borrower_id']}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Borrower deleted successfully')),
+        );
+        _fetchBorrowers();
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to delete borrower')),
+        );
+      }
     }
   }
 

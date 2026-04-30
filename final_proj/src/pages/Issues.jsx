@@ -18,6 +18,7 @@ const ICONS = {
   search:   "M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z",
   sort:     "M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4",
   book:     "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
+  stats:    "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
 };
 
 const Spinner = ({ size = 4 }) => (
@@ -148,7 +149,7 @@ export default function Issues() {
   const calculateOverdueFines = () => {
     toast("Calculate fines for all overdue books?", {
       description: "This will update fine amounts based on overdue days.",
-      action: { label: "Calculate", onClick: async () => { try { await API.post("/fines/calculate-overdue"); fetchIssues(); } catch { } } },
+      action: { label: "Calculate", onClick: async () => { try { await API.post("/fines/recalculate-all", { mode: "overdue" }); fetchIssues(); } catch { } } },
       cancel: { label: "Cancel" },
     });
   };
@@ -195,6 +196,14 @@ export default function Issues() {
             </p>
           </div>
           <div className="flex gap-2">
+            {/* Statistics button — NEW */}
+            <button
+              onClick={() => navigate("/reports/stats")}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:border-blue-300 hover:text-blue-700 text-sm font-medium transition"
+            >
+              <Ic d={ICONS.stats} />
+              Statistics
+            </button>
             <button
               onClick={calculateOverdueFines}
               className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:border-violet-300 hover:text-violet-700 text-sm font-medium transition"
@@ -269,7 +278,7 @@ export default function Issues() {
               {[5,10,20,50].map(n => <option key={n} value={n}>{n}/page</option>)}
             </select>
 
-            {/* Filters toggle — always shown */}
+            {/* Filters toggle */}
             <button
               onClick={() => setFiltersOpen(f => !f)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${

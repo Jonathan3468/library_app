@@ -27,12 +27,12 @@ class _RequestsPageState extends State<RequestsPage> {
   List<dynamic> _bookResults     = [];
   List<dynamic> _copies          = [];
 
-  bool _showBorrowerDrop = false;
-  bool _showBookDrop     = false;
+  bool _showBorrowerDrop  = false;
+  bool _showBookDrop      = false;
   bool _searchingBorrower = false;
   bool _searchingBook     = false;
-  bool _loadingCopies    = false;
-  bool _creating         = false;
+  bool _loadingCopies     = false;
+  bool _creating          = false;
 
   Map<String, dynamic>? _createResult;
 
@@ -69,6 +69,7 @@ class _RequestsPageState extends State<RequestsPage> {
   Future<void> _loadMemberBorrower(dynamic id) async {
     try {
       final res = await ApiService.get('/borrowers/$id');
+      if (!mounted) return;
       setState(() => _selectedBorrower = res.data['borrower'] ?? res.data);
     } catch (_) {}
   }
@@ -90,15 +91,18 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   Future<void> _lookupByRfId(String rfId) async {
+    if (!mounted) return;
     setState(() => _searchingBorrower = true);
     try {
       final res = await ApiService.get('/borrowers/rf/$rfId');
+      if (!mounted) return;
       if (res.data['borrower'] != null) {
         _selectBorrower(res.data['borrower']);
       } else {
         _searchBorrowers(rfId);
       }
     } catch (_) {
+      if (!mounted) return;
       _searchBorrowers(rfId);
     } finally {
       if (mounted) setState(() => _searchingBorrower = false);
@@ -106,11 +110,14 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   Future<void> _searchBorrowers(String q) async {
+    if (!mounted) return;
     setState(() => _searchingBorrower = true);
     try {
       final res = await ApiService.get('/borrowers/search?q=$q');
+      if (!mounted) return;
       setState(() { _borrowerResults = res.data['borrowers'] ?? []; _showBorrowerDrop = true; });
     } catch (_) {
+      if (!mounted) return;
       setState(() => _borrowerResults = []);
     } finally {
       if (mounted) setState(() => _searchingBorrower = false);
@@ -118,6 +125,7 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   void _selectBorrower(Map<String, dynamic> b) {
+    if (!mounted) return;
     setState(() {
       _selectedBorrower = b;
       _borrowerCtrl.text =
@@ -140,11 +148,14 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   Future<void> _searchBooks(String q) async {
+    if (!mounted) return;
     setState(() => _searchingBook = true);
     try {
       final res = await ApiService.get('/search?q=${Uri.encodeComponent(q)}');
+      if (!mounted) return;
       setState(() { _bookResults = res.data['results']?['books'] ?? []; _showBookDrop = true; });
     } catch (_) {
+      if (!mounted) return;
       setState(() => _bookResults = []);
     } finally {
       if (mounted) setState(() => _searchingBook = false);
@@ -152,6 +163,7 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   Future<void> _selectBook(Map<String, dynamic> b) async {
+    if (!mounted) return;
     setState(() {
       _selectedBook  = b;
       _bookCtrl.text = b['title'] ?? '';
@@ -163,11 +175,14 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   Future<void> _fetchCopies(dynamic bookId) async {
+    if (!mounted) return;
     setState(() => _loadingCopies = true);
     try {
       final res = await ApiService.get('/books/$bookId/copies');
+      if (!mounted) return;
       setState(() => _copies = res.data['copies'] ?? []);
     } catch (_) {
+      if (!mounted) return;
       setState(() => _copies = []);
     } finally {
       if (mounted) setState(() => _loadingCopies = false);
@@ -175,10 +190,12 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   Future<void> _fetchRequests() async {
+    if (!mounted) return;
     setState(() => _viewLoading = true);
     try {
-      final q    = _statusFilter.isNotEmpty ? '?status=$_statusFilter' : '';
-      final res  = await ApiService.get('/requests$q');
+      final q   = _statusFilter.isNotEmpty ? '?status=$_statusFilter' : '';
+      final res = await ApiService.get('/requests$q');
+      if (!mounted) return;
       setState(() => _requests = res.data['requests'] ?? []);
     } catch (_) {}
     finally {
@@ -191,12 +208,14 @@ class _RequestsPageState extends State<RequestsPage> {
     if (_selectedCopy == null && _copyCodeCtrl.text.trim().isEmpty) {
       _showSnack('Please select a copy or enter a barcode'); return;
     }
+    if (!mounted) return;
     setState(() { _creating = true; _createResult = null; });
     try {
       final res = await ApiService.post('/requests', data: {
         'rf_id': _selectedBorrower!['rf_id'] ?? _selectedBorrower!['borrower_id'].toString(),
         'copy_code': _selectedCopy != null ? _selectedCopy!['copy_code'] : _copyCodeCtrl.text.trim(),
       });
+      if (!mounted) return;
       setState(() => _createResult = {
         'success': true,
         'message': res.data['message'],
@@ -207,6 +226,7 @@ class _RequestsPageState extends State<RequestsPage> {
         if (mounted) { _clearForm(); setState(() => _createResult = null); }
       });
     } catch (e) {
+      if (!mounted) return;
       final msg = (e as dynamic).response?.data?['error'] ?? 'Failed to create request';
       setState(() => _createResult = { 'success': false, 'message': msg });
     } finally {
@@ -215,6 +235,7 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   void _clearForm() {
+    if (!mounted) return;
     _bookCtrl.clear();
     _copyCodeCtrl.clear();
     setState(() {
@@ -233,34 +254,43 @@ class _RequestsPageState extends State<RequestsPage> {
       'notify':  ('Notify Borrower?', 'An availability email will be sent.',              'Send',        const Color(0xFF2563EB)),
     };
     final cfg = labels[type]!;
+
+    // FIX: capture context before await — showDialog is fine with mounted check after
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => _ConfirmDialog(
         title: cfg.$1, description: cfg.$2, confirmLabel: cfg.$3, confirmColor: cfg.$4,
       ),
     );
-    if (confirmed != true) return;
+    // FIX: mounted check immediately after the async gap
+    if (!mounted || confirmed != true) return;
 
     try {
       if (type == 'cancel') {
         await ApiService.delete('/requests/$requestId');
+        if (!mounted) return;
         _showSnack('Request cancelled');
       } else if (type == 'fulfill') {
         final res = await ApiService.post('/requests/$requestId/fulfill');
+        if (!mounted) return;
         _showSnack('${res.data['message']}');
       } else if (type == 'notify') {
         setState(() => _notifyingIds = {..._notifyingIds, requestId});
         final res = await ApiService.post('/notifications/send-request-available/$requestId');
+        if (!mounted) return;
         _showSnack(res.data['sent'] == true ? 'Notification sent!' : res.data['message'] ?? 'Failed');
         setState(() => _notifyingIds = _notifyingIds.where((e) => e != requestId).toSet());
       }
       _fetchRequests();
     } catch (e) {
+      if (!mounted) return;
       _showSnack('Action failed');
     }
   }
 
   void _showSnack(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -272,39 +302,42 @@ class _RequestsPageState extends State<RequestsPage> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Book Requests',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Color(0xFF1F2937))),
-            const SizedBox(height: 2),
-            const Text('Reserve and manage book requests',
-                style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF))),
-            const SizedBox(height: 20),
+      // FIX: SafeArea prevents content from rendering behind status bar / notch
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Book Requests',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Color(0xFF1F2937))),
+              const SizedBox(height: 2),
+              const Text('Reserve and manage book requests',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF))),
+              const SizedBox(height: 20),
 
-            // Tabs
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
+              // Tabs
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _tabBtn(0, 'Create Request'),
+                    if (!isMember) _tabBtn(1, 'View Requests'),
+                  ],
+                ),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _tabBtn(0, 'Create Request'),
-                  if (!isMember) _tabBtn(1, 'View Requests'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-            if (_tab == 0) _buildCreateTab(isMember),
-            if (_tab == 1 && !isMember) _buildViewTab(),
-          ],
+              if (_tab == 0) _buildCreateTab(isMember),
+              if (_tab == 1 && !isMember) _buildViewTab(),
+            ],
+          ),
         ),
       ),
     );
@@ -355,7 +388,6 @@ class _RequestsPageState extends State<RequestsPage> {
               style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
           const SizedBox(height: 20),
 
-          // Borrower section
           if (isMember && _selectedBorrower != null)
             _infoBox(
               label: 'Requesting as',
@@ -395,7 +427,6 @@ class _RequestsPageState extends State<RequestsPage> {
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFF374151))),
           const SizedBox(height: 12),
 
-          // Book search
           _SearchField(
             controller: _bookCtrl,
             label: 'Search by title or ISBN',
@@ -418,7 +449,6 @@ class _RequestsPageState extends State<RequestsPage> {
                 : null,
           ),
 
-          // Copies list
           if (_selectedBook != null) ...[
             const SizedBox(height: 12),
             Container(
@@ -433,7 +463,8 @@ class _RequestsPageState extends State<RequestsPage> {
                 children: [
                   Row(children: [
                     Expanded(child: Text(_selectedBook!['title'] ?? '',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis)),
                     if (_loadingCopies)
                       const SizedBox(width: 16, height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2563EB))),
@@ -447,7 +478,7 @@ class _RequestsPageState extends State<RequestsPage> {
                         style: TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
                     const SizedBox(height: 8),
                     ..._copies.map((copy) {
-                      final isIssued  = copy['status'] == 'Issued';
+                      final isIssued   = copy['status'] == 'Issued';
                       final isSelected = _selectedCopy?['copy_id'] == copy['copy_id'];
                       return GestureDetector(
                         onTap: isIssued ? () => setState(() => _selectedCopy = copy as Map<String, dynamic>) : null,
@@ -505,7 +536,6 @@ class _RequestsPageState extends State<RequestsPage> {
           ]),
           const SizedBox(height: 16),
 
-          // Barcode input
           const Text('Scan barcode directly', style: TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
           const SizedBox(height: 6),
           TextField(
@@ -521,7 +551,6 @@ class _RequestsPageState extends State<RequestsPage> {
 
           const SizedBox(height: 16),
 
-          // Submit
           Row(
             children: [
               Expanded(
@@ -560,7 +589,6 @@ class _RequestsPageState extends State<RequestsPage> {
             ],
           ),
 
-          // Result
           if (_createResult != null) ...[
             const SizedBox(height: 16),
             Container(
@@ -636,7 +664,6 @@ class _RequestsPageState extends State<RequestsPage> {
           ),
           const SizedBox(height: 14),
 
-          // Status filters
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -728,20 +755,29 @@ class _RequestsPageState extends State<RequestsPage> {
                             Text('Copy: ${req['Copy']?['copy_code'] ?? '—'}',
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
                             const SizedBox(height: 6),
-                            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text(req['Borrower']?['borrower_name'] ?? '—',
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-                                Text(req['Borrower']?['email'] ?? '',
-                                    style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-                              ]),
-                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                Text('Req: ${_fmt(req['request_date'])}',
-                                    style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
-                                Text('Exp: ${_fmt(req['expiry_date'])}',
-                                    style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
-                              ]),
-                            ]),
+                            // FIX: Row wrapped properly to avoid overflow on narrow screens
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    Text(req['Borrower']?['borrower_name'] ?? '—',
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                        overflow: TextOverflow.ellipsis),
+                                    Text(req['Borrower']?['email'] ?? '',
+                                        style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                                        overflow: TextOverflow.ellipsis),
+                                  ]),
+                                ),
+                                const SizedBox(width: 8),
+                                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                  Text('Req: ${_fmt(req['request_date'])}',
+                                      style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
+                                  Text('Exp: ${_fmt(req['expiry_date'])}',
+                                      style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
+                                ]),
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -797,7 +833,9 @@ class _RequestsPageState extends State<RequestsPage> {
         Text(label.toUpperCase(),
             style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF60A5FA), letterSpacing: 0.5)),
         const SizedBox(height: 4),
-        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E40AF))),
+        Text(title,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E40AF)),
+            overflow: TextOverflow.ellipsis),
         if (subtitle != null)
           Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFF3B82F6))),
       ]),
@@ -910,7 +948,11 @@ class _SearchField extends StatelessWidget {
             child: Row(children: [
               const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 16),
               const SizedBox(width: 8),
-              Text(selected!, style: const TextStyle(fontSize: 12, color: Color(0xFF065F46))),
+              Expanded(
+                child: Text(selected!,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF065F46)),
+                    overflow: TextOverflow.ellipsis),
+              ),
             ]),
           ),
       ],
@@ -935,8 +977,12 @@ class _DropItem extends StatelessWidget {
           border: Border(bottom: BorderSide(color: Color(0xFFF9FAFB))),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFF1F2937))),
-          Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+          Text(title,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFF1F2937)),
+              overflow: TextOverflow.ellipsis),
+          Text(subtitle,
+              style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+              overflow: TextOverflow.ellipsis),
         ]),
       ),
     );

@@ -736,4 +736,122 @@ router.get("/recommendations/:book_id", async (req, res) => {
   }
 });
 
+
+// ======================================================
+// BULK IMPORT BOOKS
+// POST /books/import
+// Body: { books: [ { title, isbn, publication_year,
+//                    author_name, genre_name,
+//                    category_name, publication_name } ] }
+// Only librarians and admins can import
+// ======================================================
+
+router.post("/import", auth, requireLibrarian, async (req, res) => {
+  try {
+    const { books: rows } = req.body;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "No book rows provided" });
+    }
+    if (rows.length > 500) {
+      return res.status(400).json({ error: "Maximum 500 rows per import" });
+    }
+
+    const results = { created: 0, skipped: 0, errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // 1-indexed + header row offset
+
+      // Validate required fields
+      if (!row.title?.trim()) {
+        results.errors.push({ row: rowNum, error: "Missing title" });
+        results.skipped++;
+        continue;
+      }
+      if (!row.isbn?.trim()) {
+        results.errors.push({ row: rowNum, error: "Missing isbn" });
+        results.skipped++;
+        continue;
+      }
+      if (!row.publication_year) {
+        results.errors.push({ row: rowNum, error: "Missing publication_year" });
+        results.skipped++;
+        continue;
+      }
+
+      // Skip duplicate ISBNs
+      const existing = await Book.findOne({ where: { isbn: row.isbn.trim() } });
+      if (existing) {
+        results.errors.push({ row: rowNum, error: `ISBN "${row.isbn}" already exists (skipped)` });
+        results.skipped++;
+        continue;
+      }
+
+      try {
+        // Auto-create or find Category
+        let category_id = null;
+        if (row.category_name?.trim()) {
+          const [cat] = await Category.findOrCreate({
+            where: { category_name: row.category_name.trim() },
+            defaults: { category_name: row.category_name.trim() }
+          });
+          category_id = cat.category_id;
+        }
+
+        // Auto-create or find Publication
+        let publication_id = null;
+        if (row.publication_name?.trim()) {
+          const [pub] = await Publication.findOrCreate({
+            where: { publication_name: row.publication_name.trim() },
+            defaults: { publication_name: row.publication_name.trim() }
+          });
+          publication_id = pub.publication_id;
+        }
+
+        // Create the book
+        const book = await Book.create({
+          title: row.title.trim(),
+          isbn: row.isbn.trim(),
+          publication_year: parseInt(row.publication_year) || null,
+          category_id,
+          publication_id,
+        });
+
+        // Auto-create or find Author and associate
+        if (row.author_name?.trim()) {
+          const [author] = await Author.findOrCreate({
+            where: { author_name: row.author_name.trim() },
+            defaults: { author_name: row.author_name.trim() }
+          });
+          await book.addAuthor(author);
+        }
+
+        // Auto-create or find Genre and associate
+        if (row.genre_name?.trim()) {
+          const [genre] = await Genre.findOrCreate({
+            where: { genre_name: row.genre_name.trim() },
+            defaults: { genre_name: row.genre_name.trim() }
+          });
+          await book.addGenre(genre);
+        }
+
+        results.created++;
+      } catch (err) {
+        results.errors.push({ row: rowNum, error: err.message });
+        results.skipped++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Import complete: ${results.created} created, ${results.skipped} skipped`,
+      ...results,
+    });
+  } catch (err) {
+    console.error("BOOK IMPORT ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

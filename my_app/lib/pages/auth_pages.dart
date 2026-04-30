@@ -1,4 +1,5 @@
 // lib/pages/auth_pages.dart
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -13,41 +14,82 @@ class AuthPage extends StatefulWidget {
 
 class _AuthPageState extends State<AuthPage> {
   // 'login' | 'register' | 'forgot'
-  String _mode = 'login';
-  bool _loading = false;
+  String _mode    = 'login';
+  bool   _loading = false;
 
-  // ── Login ──
+  // ── Login ──────────────────────────────────────────────────────────────────
   final _loginEmailCtrl    = TextEditingController();
   final _loginPasswordCtrl = TextEditingController();
   bool _loginObscure       = true;
-  final Map<String, String?> _loginErrors   = {};
-  final Map<String, bool>    _loginTouched  = {};
+  final Map<String, String?> _loginErrors  = {};
+  final Map<String, bool>    _loginTouched = {};
+  String? _loginServerError;
 
-  // ── Register ──
-  final _regNameCtrl     = TextEditingController();
-  final _regEmailCtrl    = TextEditingController();
-  final _regPassCtrl     = TextEditingController();
-  final _regConfirmCtrl  = TextEditingController();
-  final _regCodeCtrl     = TextEditingController();
-  bool _regObscure       = true;
+  // ── Register ───────────────────────────────────────────────────────────────
+  final _regNameCtrl    = TextEditingController();
+  final _regEmailCtrl   = TextEditingController();
+  final _regPassCtrl    = TextEditingController();
+  final _regConfirmCtrl = TextEditingController();
+  final _regCodeCtrl    = TextEditingController();
+  bool _regObscure        = true;
   bool _regConfirmObscure = true;
-  String _selectedRole   = 'member';
+  String _selectedRole    = 'member';
   final Map<String, String?> _regErrors  = {};
   final Map<String, bool>    _regTouched = {};
+  String? _regServerError;
 
-  // ── Forgot ──
+  // ── Forgot ─────────────────────────────────────────────────────────────────
   final _forgotEmailCtrl = TextEditingController();
+  String? _forgotEmailError;
+  bool    _forgotEmailTouched = false;
 
   @override
   void dispose() {
-    _loginEmailCtrl.dispose(); _loginPasswordCtrl.dispose();
-    _regNameCtrl.dispose(); _regEmailCtrl.dispose();
-    _regPassCtrl.dispose(); _regConfirmCtrl.dispose(); _regCodeCtrl.dispose();
+    _loginEmailCtrl.dispose();
+    _loginPasswordCtrl.dispose();
+    _regNameCtrl.dispose();
+    _regEmailCtrl.dispose();
+    _regPassCtrl.dispose();
+    _regConfirmCtrl.dispose();
+    _regCodeCtrl.dispose();
     _forgotEmailCtrl.dispose();
     super.dispose();
   }
 
-  // ── Validators ────────────────────────────────────────────────────────────
+  // ── Switch mode — resets ALL form state ────────────────────────────────────
+  void _switchMode(String next) {
+    setState(() {
+      _mode = next;
+
+      // Reset login
+      _loginEmailCtrl.clear();
+      _loginPasswordCtrl.clear();
+      _loginErrors.clear();
+      _loginTouched.clear();
+      _loginServerError = null;
+      _loginObscure = true;
+
+      // Reset register
+      _regNameCtrl.clear();
+      _regEmailCtrl.clear();
+      _regPassCtrl.clear();
+      _regConfirmCtrl.clear();
+      _regCodeCtrl.clear();
+      _regErrors.clear();
+      _regTouched.clear();
+      _regServerError = null;
+      _selectedRole = 'member';
+      _regObscure = true;
+      _regConfirmObscure = true;
+
+      // Reset forgot
+      _forgotEmailCtrl.clear();
+      _forgotEmailError = null;
+      _forgotEmailTouched = false;
+    });
+  }
+
+  // ── Validators ─────────────────────────────────────────────────────────────
 
   String? _validateName(String v) {
     if (v.trim().isEmpty) return 'Full name is required.';
@@ -82,7 +124,7 @@ class _AuthPageState extends State<AuthPage> {
     return null;
   }
 
-  // ── Password strength ─────────────────────────────────────────────────────
+  // ── Password strength ──────────────────────────────────────────────────────
 
   int _passwordStrength(String p) {
     if (p.isEmpty) return 0;
@@ -94,10 +136,11 @@ class _AuthPageState extends State<AuthPage> {
     return score;
   }
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // ── Actions ────────────────────────────────────────────────────────────────
 
   Future<void> _handleLogin() async {
     setState(() {
+      _loginServerError         = null;
       _loginTouched['email']    = true;
       _loginTouched['password'] = true;
       _loginErrors['email']     = _validateEmail(_loginEmailCtrl.text);
@@ -107,15 +150,27 @@ class _AuthPageState extends State<AuthPage> {
 
     setState(() => _loading = true);
     try {
-      await AuthService.login(_loginEmailCtrl.text.trim(), _loginPasswordCtrl.text.trim());
+      await AuthService.login(
+        _loginEmailCtrl.text.trim(),
+        _loginPasswordCtrl.text.trim(),
+      );
       if (mounted) context.go('/dashboard');
-    } catch (_) {}
-    finally { if (mounted) setState(() => _loading = false); }
+    } catch (err) {
+      if (mounted) {
+        setState(() => _loginServerError =
+            _extractErrorMessage(err));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _handleRegister() async {
     setState(() {
-      for (final f in ['name', 'email', 'password', 'confirm', 'roleCode']) _regTouched[f] = true;
+      _regServerError = null;
+      for (final f in ['name', 'email', 'password', 'confirm', 'roleCode']) {
+        _regTouched[f] = true;
+      }
       _regErrors['name']     = _validateName(_regNameCtrl.text);
       _regErrors['email']    = _validateEmail(_regEmailCtrl.text);
       _regErrors['password'] = _validatePassword(_regPassCtrl.text);
@@ -127,34 +182,121 @@ class _AuthPageState extends State<AuthPage> {
     setState(() => _loading = true);
     try {
       await AuthService.register(
-        name: _regNameCtrl.text.trim(),
-        email: _regEmailCtrl.text.trim(),
+        name:     _regNameCtrl.text.trim(),
+        email:    _regEmailCtrl.text.trim(),
         password: _regPassCtrl.text,
-        role: _selectedRole,
+        role:     _selectedRole,
         roleCode: _regCodeCtrl.text.trim(),
       );
       if (mounted) {
-        setState(() => _mode = 'login');
+        _switchMode('login');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Account created! Please sign in.')),
         );
       }
-    } catch (_) {}
-    finally { if (mounted) setState(() => _loading = false); }
+    } catch (err) {
+      if (mounted) {
+        setState(() => _regServerError =
+            _extractErrorMessage(err));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _handleForgotPassword() async {
-    final email = _forgotEmailCtrl.text.trim();
-    if (email.isEmpty) return;
+    final emailErr = _validateEmail(_forgotEmailCtrl.text);
+    setState(() {
+      _forgotEmailTouched = true;
+      _forgotEmailError   = emailErr;
+    });
+    if (emailErr != null) return;
+
     setState(() => _loading = true);
     try {
-      await AuthService.forgotPassword(email);
-      if (mounted) context.go('/reset-password');
-    } catch (_) {}
-    finally { if (mounted) setState(() => _loading = false); }
+      await AuthService.forgotPassword(_forgotEmailCtrl.text.trim());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reset link sent! Check your inbox.')),
+        );
+        context.go('/reset-password');
+      }
+    } catch (err) {
+      if (mounted) {
+        setState(() => _forgotEmailError =
+            _extractErrorMessage(err));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  /// Extracts a clean, user-friendly message from any thrown error.
+  /// Handles Dio, http package, and plain Dart exceptions.
+  /// Extracts a clean, user-friendly message from a Dio error.
+  String _extractErrorMessage(Object err) {
+    if (err is DioException) {
+      // 1. Try to read the server's own error field from the response body.
+      final data = err.response?.data;
+      if (data is Map) {
+        final msg = data['error'] ?? data['message'] ?? data['msg'];
+        if (msg != null && msg.toString().trim().isNotEmpty) {
+          return msg.toString().trim();
+        }
+      }
+      if (data is String && data.trim().isNotEmpty) return data.trim();
+
+      // 2. Fall back to HTTP status code description.
+      final status = err.response?.statusCode;
+      if (status != null) return _statusMessage(status);
+
+      // 3. Fall back to connection error type.
+      switch (err.type) {
+        case DioExceptionType.connectionTimeout:
+        case DioExceptionType.sendTimeout:
+        case DioExceptionType.receiveTimeout:
+          return 'Connection timed out. Check your internet and try again.';
+        case DioExceptionType.connectionError:
+          return 'Could not reach the server. Check your internet connection.';
+        case DioExceptionType.cancel:
+          return 'Request was cancelled. Please try again.';
+        default:
+          return 'Network error. Please check your connection and try again.';
+      }
+    }
+
+    // Plain Dart exceptions — guard against stack-trace dumps.
+    if (err is FormatException) {
+      return 'Unexpected response from server. Please try again.';
+    }
+    if (err is Exception) {
+      final raw = err.toString().replaceFirst('Exception: ', '').trim();
+      if (raw.length < 120 && !raw.contains('\n') && !raw.contains('.dart:')) {
+        return raw.isNotEmpty ? raw : 'Something went wrong. Please try again.';
+      }
+    }
+
+    return 'An unexpected error occurred. Please try again.';
+  }
+
+  /// Maps HTTP status codes to friendly one-liners.
+  String _statusMessage(int status) {
+    switch (status) {
+      case 400: return 'Invalid request. Please check your details.';
+      case 401: return 'Incorrect email or password.';
+      case 403: return 'Access denied. Check your access code.';
+      case 404: return 'Account not found.';
+      case 409: return 'An account with this email already exists.';
+      case 422: return 'Invalid details provided. Please review and try again.';
+      case 429: return 'Too many attempts. Please wait a moment and try again.';
+      case 500:
+      case 502:
+      case 503: return 'Server error. Please try again in a moment.';
+      default:  return 'Something went wrong (error $status). Please try again.';
+    }
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -172,13 +314,18 @@ class _AuthPageState extends State<AuthPage> {
                   // Brand
                   Container(
                     width: 56, height: 56,
-                    decoration: BoxDecoration(color: const Color(0xFF2563EB), borderRadius: BorderRadius.circular(16)),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     child: const Icon(Icons.menu_book_rounded, color: Colors.white, size: 28),
                   ),
                   const SizedBox(height: 12),
-                  const Text('SmartLib', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Color(0xFF111827))),
+                  const Text('SmartLib',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Color(0xFF111827))),
                   const SizedBox(height: 4),
-                  const Text('Library Management System', style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF))),
+                  const Text('Library Management System',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF))),
                   const SizedBox(height: 28),
 
                   // Card
@@ -190,16 +337,19 @@ class _AuthPageState extends State<AuthPage> {
                     ),
                     child: Column(children: [
 
-                      // ── Tab bar (login / register) ──
+                      // Tab bar
                       if (_mode != 'forgot')
                         Container(
                           decoration: const BoxDecoration(
                             border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
-                            borderRadius: BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+                            borderRadius: BorderRadius.only(
+                              topLeft:  Radius.circular(20),
+                              topRight: Radius.circular(20),
+                            ),
                           ),
                           child: Row(children: [
-                            _Tab('Sign In',  _mode == 'login',    () => setState(() => _mode = 'login'),    isFirst: true),
-                            _Tab('Register', _mode == 'register', () => setState(() => _mode = 'register'), isFirst: false),
+                            _Tab('Sign In',  _mode == 'login',    () => _switchMode('login'),    isFirst: true),
+                            _Tab('Register', _mode == 'register', () => _switchMode('register'), isFirst: false),
                           ]),
                         ),
 
@@ -232,199 +382,340 @@ class _AuthPageState extends State<AuthPage> {
   // ── Login form ─────────────────────────────────────────────────────────────
 
   Widget _buildLoginForm() {
-    return Column(key: const ValueKey('login'), crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _AuthField(
-        label: 'Email',
-        ctrl: _loginEmailCtrl,
-        type: TextInputType.emailAddress,
-        hint: 'you@example.com',
-        icon: Icons.mail_outline,
-        error: _loginTouched['email'] == true ? _loginErrors['email'] : null,
-        onChanged: (v) {
-          if (_loginTouched['email'] == true) setState(() => _loginErrors['email'] = _validateEmail(v));
-        },
-        onBlur: () => setState(() {
-          _loginTouched['email'] = true;
-          _loginErrors['email']  = _validateEmail(_loginEmailCtrl.text);
-        }),
-      ),
-      _AuthField(
-        label: 'Password',
-        ctrl: _loginPasswordCtrl,
-        hint: '••••••••',
-        icon: Icons.lock_outline,
-        obscure: _loginObscure,
-        onToggleObscure: () => setState(() => _loginObscure = !_loginObscure),
-        error: _loginTouched['password'] == true ? _loginErrors['password'] : null,
-        onChanged: (v) {
-          if (_loginTouched['password'] == true) setState(() => _loginErrors['password'] = v.isEmpty ? 'Password is required.' : null);
-        },
-        onBlur: () => setState(() {
-          _loginTouched['password'] = true;
-          _loginErrors['password']  = _loginPasswordCtrl.text.isEmpty ? 'Password is required.' : null;
-        }),
-        onSubmit: (_) => _handleLogin(),
-      ),
-      Align(
-        alignment: Alignment.centerRight,
-        child: GestureDetector(
-          onTap: () => setState(() => _mode = 'forgot'),
-          child: const Padding(
-            padding: EdgeInsets.only(bottom: 16),
-            child: Text('Forgot password?', style: TextStyle(fontSize: 12, color: Color(0xFF2563EB), fontWeight: FontWeight.w500)),
+    return Column(
+      key: const ValueKey('login'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _AuthField(
+          label: 'Email',
+          ctrl: _loginEmailCtrl,
+          type: TextInputType.emailAddress,
+          hint: 'you@example.com',
+          icon: Icons.mail_outline,
+          error: _loginTouched['email'] == true ? _loginErrors['email'] : null,
+          onChanged: (v) {
+            if (_loginTouched['email'] == true) {
+              setState(() => _loginErrors['email'] = _validateEmail(v));
+            }
+          },
+          onBlur: () => setState(() {
+            _loginTouched['email'] = true;
+            _loginErrors['email']  = _validateEmail(_loginEmailCtrl.text);
+          }),
+        ),
+        _AuthField(
+          label: 'Password',
+          ctrl: _loginPasswordCtrl,
+          hint: '••••••••',
+          icon: Icons.lock_outline,
+          obscure: _loginObscure,
+          onToggleObscure: () => setState(() => _loginObscure = !_loginObscure),
+          error: _loginTouched['password'] == true ? _loginErrors['password'] : null,
+          onChanged: (v) {
+            if (_loginTouched['password'] == true) {
+              setState(() => _loginErrors['password'] = v.isEmpty ? 'Password is required.' : null);
+            }
+          },
+          onBlur: () => setState(() {
+            _loginTouched['password'] = true;
+            _loginErrors['password']  = _loginPasswordCtrl.text.isEmpty ? 'Password is required.' : null;
+          }),
+          onSubmit: (_) => _handleLogin(),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: GestureDetector(
+            onTap: () => _switchMode('forgot'),
+            child: const Padding(
+              padding: EdgeInsets.only(bottom: 16),
+              child: Text(
+                'Forgot password?',
+                style: TextStyle(fontSize: 12, color: Color(0xFF2563EB), fontWeight: FontWeight.w500),
+              ),
+            ),
           ),
         ),
-      ),
-      _SubmitButton(label: 'Sign In', loading: _loading, onTap: _handleLogin),
-    ]);
+
+        // Server error banner
+        if (_loginServerError != null) ...[
+          _ServerErrorBanner(_loginServerError!),
+          const SizedBox(height: 12),
+        ],
+
+        _SubmitButton(label: 'Sign In', loading: _loading, onTap: _handleLogin),
+      ],
+    );
   }
 
   // ── Register form ──────────────────────────────────────────────────────────
 
   Widget _buildRegisterForm() {
     final strength = _passwordStrength(_regPassCtrl.text);
-    return Column(key: const ValueKey('register'), crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _AuthField(
-        label: 'Full Name',
-        ctrl: _regNameCtrl,
-        hint: 'Jane Smith',
-        icon: Icons.person_outline,
-        error: _regTouched['name'] == true ? _regErrors['name'] : null,
-        onChanged: (v) { if (_regTouched['name'] == true) setState(() => _regErrors['name'] = _validateName(v)); },
-        onBlur: () => setState(() { _regTouched['name'] = true; _regErrors['name'] = _validateName(_regNameCtrl.text); }),
-      ),
-      _AuthField(
-        label: 'Email',
-        ctrl: _regEmailCtrl,
-        type: TextInputType.emailAddress,
-        hint: 'you@example.com',
-        icon: Icons.mail_outline,
-        error: _regTouched['email'] == true ? _regErrors['email'] : null,
-        onChanged: (v) { if (_regTouched['email'] == true) setState(() => _regErrors['email'] = _validateEmail(v)); },
-        onBlur: () => setState(() { _regTouched['email'] = true; _regErrors['email'] = _validateEmail(_regEmailCtrl.text); }),
-      ),
-      _AuthField(
-        label: 'Password',
-        ctrl: _regPassCtrl,
-        hint: '••••••••',
-        icon: Icons.lock_outline,
-        obscure: _regObscure,
-        onToggleObscure: () => setState(() => _regObscure = !_regObscure),
-        error: _regTouched['password'] == true ? _regErrors['password'] : null,
-        onChanged: (v) {
-          setState(() {
-            if (_regTouched['password'] == true) _regErrors['password'] = _validatePassword(v);
-          });
-        },
-        onBlur: () => setState(() { _regTouched['password'] = true; _regErrors['password'] = _validatePassword(_regPassCtrl.text); }),
-      ),
-      // Password strength bar
-      if (_regPassCtrl.text.isNotEmpty) ...[
-        Row(children: List.generate(4, (i) => Expanded(child: Container(
-          margin: const EdgeInsets.only(right: 4),
-          height: 3,
-          decoration: BoxDecoration(
-            color: i < strength ? [
-              const Color(0xFFEF4444),
-              const Color(0xFFF59E0B),
-              const Color(0xFF3B82F6),
-              const Color(0xFF10B981),
-            ][strength - 1] : const Color(0xFFE5E7EB),
-            borderRadius: BorderRadius.circular(2),
-          ),
-        )))),
-        const SizedBox(height: 4),
-        Text(
-          ['', 'Weak', 'Fair', 'Strong', 'Very Strong'][strength],
-          style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-        ),
-        const SizedBox(height: 12),
-      ],
-      _AuthField(
-        label: 'Confirm Password',
-        ctrl: _regConfirmCtrl,
-        hint: '••••••••',
-        icon: Icons.lock_outline,
-        obscure: _regConfirmObscure,
-        onToggleObscure: () => setState(() => _regConfirmObscure = !_regConfirmObscure),
-        error: _regTouched['confirm'] == true ? _regErrors['confirm'] : null,
-        onChanged: (v) { if (_regTouched['confirm'] == true) setState(() => _regErrors['confirm'] = _validateConfirm(v)); },
-        onBlur: () => setState(() { _regTouched['confirm'] = true; _regErrors['confirm'] = _validateConfirm(_regConfirmCtrl.text); }),
-      ),
-
-      // Role selector
-      const _FieldLabel('Account Role'),
-      const SizedBox(height: 8),
-      Row(children: [
-        _RoleCard(role: 'member',    label: 'Member',    desc: 'Browse & borrow books',      selected: _selectedRole, onTap: (r) => setState(() { _selectedRole = r; _regCodeCtrl.clear(); })),
-        const SizedBox(width: 8),
-        _RoleCard(role: 'librarian', label: 'Librarian', desc: 'Manage library operations',  selected: _selectedRole, onTap: (r) => setState(() { _selectedRole = r; _regCodeCtrl.clear(); })),
-        const SizedBox(width: 8),
-        _RoleCard(role: 'admin',     label: 'Admin',     desc: 'Full system access',          selected: _selectedRole, onTap: (r) => setState(() { _selectedRole = r; _regCodeCtrl.clear(); })),
-      ]),
-      const SizedBox(height: 14),
-
-      // Role code (non-member)
-      if (_selectedRole != 'member') ...[
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFFBEB),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFFDE68A)),
-          ),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Icon(Icons.lock_outline, size: 14, color: Color(0xFFB45309)),
-            const SizedBox(width: 8),
-            Expanded(child: Text(
-              '${_selectedRole[0].toUpperCase()}${_selectedRole.substring(1)} access requires an authorization code.',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF92400E)),
-            )),
-          ]),
+    return Column(
+      key: const ValueKey('register'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _AuthField(
+          label: 'Full Name',
+          ctrl: _regNameCtrl,
+          hint: 'Jane Smith',
+          icon: Icons.person_outline,
+          error: _regTouched['name'] == true ? _regErrors['name'] : null,
+          onChanged: (v) {
+            if (_regTouched['name'] == true) setState(() => _regErrors['name'] = _validateName(v));
+          },
+          onBlur: () => setState(() {
+            _regTouched['name'] = true;
+            _regErrors['name']  = _validateName(_regNameCtrl.text);
+          }),
         ),
         _AuthField(
-          label: '${_selectedRole[0].toUpperCase()}${_selectedRole.substring(1)} Access Code',
-          ctrl: _regCodeCtrl,
-          hint: 'Enter your access code',
-          icon: Icons.vpn_key_outlined,
-          error: _regTouched['roleCode'] == true ? _regErrors['roleCode'] : null,
-          onChanged: (v) { if (_regTouched['roleCode'] == true) setState(() => _regErrors['roleCode'] = _validateRoleCode(v)); },
-          onBlur: () => setState(() { _regTouched['roleCode'] = true; _regErrors['roleCode'] = _validateRoleCode(_regCodeCtrl.text); }),
+          label: 'Email',
+          ctrl: _regEmailCtrl,
+          type: TextInputType.emailAddress,
+          hint: 'you@example.com',
+          icon: Icons.mail_outline,
+          error: _regTouched['email'] == true ? _regErrors['email'] : null,
+          onChanged: (v) {
+            if (_regTouched['email'] == true) setState(() => _regErrors['email'] = _validateEmail(v));
+          },
+          onBlur: () => setState(() {
+            _regTouched['email'] = true;
+            _regErrors['email']  = _validateEmail(_regEmailCtrl.text);
+          }),
         ),
-      ],
+        _AuthField(
+          label: 'Password',
+          ctrl: _regPassCtrl,
+          hint: '••••••••',
+          icon: Icons.lock_outline,
+          obscure: _regObscure,
+          onToggleObscure: () => setState(() => _regObscure = !_regObscure),
+          error: _regTouched['password'] == true ? _regErrors['password'] : null,
+          onChanged: (v) {
+            setState(() {
+              if (_regTouched['password'] == true) _regErrors['password'] = _validatePassword(v);
+              // Re-validate confirm if already touched, since it depends on password value
+              if (_regTouched['confirm'] == true) _regErrors['confirm'] = _validateConfirm(_regConfirmCtrl.text);
+            });
+          },
+          onBlur: () => setState(() {
+            _regTouched['password'] = true;
+            _regErrors['password']  = _validatePassword(_regPassCtrl.text);
+          }),
+        ),
 
-      _SubmitButton(label: 'Create Account', loading: _loading, onTap: _handleRegister),
-    ]);
+        // Password strength bar
+        if (_regPassCtrl.text.isNotEmpty) ...[
+          Row(
+            children: List.generate(4, (i) => Expanded(
+              child: Container(
+                margin: const EdgeInsets.only(right: 4),
+                height: 3,
+                decoration: BoxDecoration(
+                  color: i < strength
+                      ? [
+                          const Color(0xFFEF4444),
+                          const Color(0xFFF59E0B),
+                          const Color(0xFF3B82F6),
+                          const Color(0xFF10B981),
+                        ][strength - 1]
+                      : const Color(0xFFE5E7EB),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            )),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            ['', 'Weak', 'Fair', 'Strong', 'Very Strong'][strength],
+            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        _AuthField(
+          label: 'Confirm Password',
+          ctrl: _regConfirmCtrl,
+          hint: '••••••••',
+          icon: Icons.lock_outline,
+          obscure: _regConfirmObscure,
+          onToggleObscure: () => setState(() => _regConfirmObscure = !_regConfirmObscure),
+          error: _regTouched['confirm'] == true ? _regErrors['confirm'] : null,
+          onChanged: (v) {
+            if (_regTouched['confirm'] == true) setState(() => _regErrors['confirm'] = _validateConfirm(v));
+          },
+          onBlur: () => setState(() {
+            _regTouched['confirm'] = true;
+            _regErrors['confirm']  = _validateConfirm(_regConfirmCtrl.text);
+          }),
+        ),
+
+        // Role selector
+        const _FieldLabel('Account Role'),
+        const SizedBox(height: 8),
+        Row(children: [
+          _RoleCard(
+            role: 'member',    label: 'Member',    desc: 'Browse & borrow books',
+            selected: _selectedRole,
+            onTap: (r) => setState(() {
+              _selectedRole = r;
+              _regCodeCtrl.clear();
+              _regErrors['roleCode'] = null;
+              _regTouched['roleCode'] = false;
+            }),
+          ),
+          const SizedBox(width: 8),
+          _RoleCard(
+            role: 'librarian', label: 'Librarian', desc: 'Manage library operations',
+            selected: _selectedRole,
+            onTap: (r) => setState(() {
+              _selectedRole = r;
+              _regCodeCtrl.clear();
+              _regErrors['roleCode'] = null;
+              _regTouched['roleCode'] = false;
+            }),
+          ),
+          const SizedBox(width: 8),
+          _RoleCard(
+            role: 'admin',     label: 'Admin',     desc: 'Full system access',
+            selected: _selectedRole,
+            onTap: (r) => setState(() {
+              _selectedRole = r;
+              _regCodeCtrl.clear();
+              _regErrors['roleCode'] = null;
+              _regTouched['roleCode'] = false;
+            }),
+          ),
+        ]),
+        const SizedBox(height: 14),
+
+        // Role code (non-member)
+        if (_selectedRole != 'member') ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBEB),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFFDE68A)),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.lock_outline, size: 14, color: Color(0xFFB45309)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${_selectedRole[0].toUpperCase()}${_selectedRole.substring(1)} access requires an authorization code.',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF92400E)),
+                ),
+              ),
+            ]),
+          ),
+          _AuthField(
+            label: '${_selectedRole[0].toUpperCase()}${_selectedRole.substring(1)} Access Code',
+            ctrl: _regCodeCtrl,
+            hint: 'Enter your access code',
+            icon: Icons.vpn_key_outlined,
+            error: _regTouched['roleCode'] == true ? _regErrors['roleCode'] : null,
+            onChanged: (v) {
+              if (_regTouched['roleCode'] == true) {
+                setState(() => _regErrors['roleCode'] = _validateRoleCode(v));
+              }
+            },
+            onBlur: () => setState(() {
+              _regTouched['roleCode'] = true;
+              _regErrors['roleCode']  = _validateRoleCode(_regCodeCtrl.text);
+            }),
+          ),
+        ],
+
+        // Server error banner
+        if (_regServerError != null) ...[
+          _ServerErrorBanner(_regServerError!),
+          const SizedBox(height: 12),
+        ],
+
+        _SubmitButton(label: 'Create Account', loading: _loading, onTap: _handleRegister),
+      ],
+    );
   }
 
   // ── Forgot password form ───────────────────────────────────────────────────
 
   Widget _buildForgotForm() {
-    return Column(key: const ValueKey('forgot'), crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Forgot Password', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF111827))),
-      const SizedBox(height: 6),
-      const Text(
-        "Enter your registered email and we'll send you a reset code.",
-        style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+    return Column(
+      key: const ValueKey('forgot'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Forgot Password',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF111827))),
+        const SizedBox(height: 6),
+        const Text(
+          "Enter your registered email and we'll send you a reset link.",
+          style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+        ),
+        const SizedBox(height: 20),
+        _AuthField(
+          label: 'Email',
+          ctrl: _forgotEmailCtrl,
+          type: TextInputType.emailAddress,
+          hint: 'you@example.com',
+          icon: Icons.mail_outline,
+          error: _forgotEmailTouched ? _forgotEmailError : null,
+          onChanged: (v) {
+            if (_forgotEmailTouched) {
+              setState(() => _forgotEmailError = _validateEmail(v));
+            }
+          },
+          onBlur: () => setState(() {
+            _forgotEmailTouched = true;
+            _forgotEmailError   = _validateEmail(_forgotEmailCtrl.text);
+          }),
+          onSubmit: (_) => _handleForgotPassword(),
+        ),
+        const SizedBox(height: 8),
+        _SubmitButton(label: 'Send Reset Link', loading: _loading, onTap: _handleForgotPassword),
+        const SizedBox(height: 12),
+        Center(
+          child: GestureDetector(
+            onTap: () => _switchMode('login'),
+            child: const Text(
+              '← Back to login',
+              style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Server error banner ───────────────────────────────────────────────────────
+
+class _ServerErrorBanner extends StatelessWidget {
+  final String message;
+  const _ServerErrorBanner(this.message);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFECACA)),
       ),
-      const SizedBox(height: 20),
-      _AuthField(
-        label: 'Email',
-        ctrl: _forgotEmailCtrl,
-        type: TextInputType.emailAddress,
-        hint: 'you@example.com',
-        icon: Icons.mail_outline,
-        onSubmit: (_) => _handleForgotPassword(),
-      ),
-      const SizedBox(height: 8),
-      _SubmitButton(label: 'Send Reset Code', loading: _loading, onTap: _handleForgotPassword),
-      const SizedBox(height: 12),
-      Center(child: GestureDetector(
-        onTap: () => setState(() => _mode = 'login'),
-        child: const Text('← Back to login', style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-      )),
-    ]);
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.error_outline, size: 15, color: Color(0xFFEF4444)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            message,
+            style: const TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
+          ),
+        ),
+      ]),
+    );
   }
 }
 
@@ -447,7 +738,10 @@ class _Tab extends StatelessWidget {
           decoration: BoxDecoration(
             color: active ? Colors.white : const Color(0xFFF9FAFB),
             border: Border(
-              bottom: BorderSide(color: active ? const Color(0xFF2563EB) : Colors.transparent, width: 2),
+              bottom: BorderSide(
+                color: active ? const Color(0xFF2563EB) : Colors.transparent,
+                width: 2,
+              ),
             ),
             borderRadius: BorderRadius.only(
               topLeft:  isFirst ? const Radius.circular(20) : Radius.zero,
@@ -474,7 +768,10 @@ class _Tab extends StatelessWidget {
 class _RoleCard extends StatelessWidget {
   final String role, label, desc, selected;
   final ValueChanged<String> onTap;
-  const _RoleCard({required this.role, required this.label, required this.desc, required this.selected, required this.onTap});
+  const _RoleCard({
+    required this.role, required this.label, required this.desc,
+    required this.selected, required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -493,7 +790,11 @@ class _RoleCard extends StatelessWidget {
             ),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: active ? const Color(0xFF1D4ED8) : const Color(0xFF374151))),
+            Text(label, style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: active ? const Color(0xFF1D4ED8) : const Color(0xFF374151),
+            )),
             const SizedBox(height: 2),
             Text(desc, style: const TextStyle(fontSize: 9, color: Color(0xFF9CA3AF), height: 1.3)),
           ]),
@@ -503,11 +804,12 @@ class _RoleCard extends StatelessWidget {
   }
 }
 
-// ── Shared field widgets ──────────────────────────────────────────────────────
+// ── Shared field widgets ───────────────────────────────────────────────────────
 
 class _FieldLabel extends StatelessWidget {
   final String label;
   const _FieldLabel(this.label);
+
   @override
   Widget build(BuildContext context) => Text(
     label,
@@ -528,9 +830,17 @@ class _AuthField extends StatelessWidget {
   final ValueChanged<String>? onSubmit;
 
   const _AuthField({
-    required this.label, required this.ctrl, required this.hint, required this.icon,
-    this.type = TextInputType.text, this.obscure, this.onToggleObscure,
-    this.error, this.onChanged, this.onBlur, this.onSubmit,
+    required this.label,
+    required this.ctrl,
+    required this.hint,
+    required this.icon,
+    this.type = TextInputType.text,
+    this.obscure,
+    this.onToggleObscure,
+    this.error,
+    this.onChanged,
+    this.onBlur,
+    this.onSubmit,
   });
 
   @override
@@ -553,27 +863,50 @@ class _AuthField extends StatelessWidget {
             hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFD1D5DB)),
             prefixIcon: Icon(icon, size: 17, color: const Color(0xFF9CA3AF)),
             suffixIcon: obscure != null
-              ? GestureDetector(
-                  onTap: onToggleObscure,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(obscure! ? 'SHOW' : 'HIDE',
-                        style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600)),
-                  ),
-                )
-              : null,
+                ? GestureDetector(
+                    onTap: onToggleObscure,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        obscure! ? 'SHOW' : 'HIDE',
+                        style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  )
+                : null,
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: hasError ? const Color(0xFFF87171) : const Color(0xFFE5E7EB))),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: hasError ? const Color(0xFFF87171) : const Color(0xFFE5E7EB))),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: hasError ? const Color(0xFFF87171) : const Color(0xFF2563EB), width: 1.5)),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: hasError ? const Color(0xFFF87171) : const Color(0xFFE5E7EB)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: hasError ? const Color(0xFFF87171) : const Color(0xFFE5E7EB)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                color: hasError ? const Color(0xFFF87171) : const Color(0xFF2563EB),
+                width: 1.5,
+              ),
+            ),
             filled: true,
-            fillColor: const Color(0xFFFAFAFA),
+            fillColor: hasError ? const Color(0xFFFEF2F2) : const Color(0xFFFAFAFA),
           ),
         ),
       ),
       if (hasError) ...[
         const SizedBox(height: 4),
-        Text(error!, style: const TextStyle(fontSize: 11, color: Color(0xFFEF4444))),
+        Row(children: [
+          const Icon(Icons.error_outline, size: 12, color: Color(0xFFEF4444)),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              error!,
+              style: const TextStyle(fontSize: 11, color: Color(0xFFEF4444)),
+            ),
+          ),
+        ]),
       ],
       const SizedBox(height: 14),
     ]);
@@ -599,9 +932,13 @@ class _SubmitButton extends StatelessWidget {
             color: loading ? const Color(0xFF93C5FD) : const Color(0xFF2563EB),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Center(child: loading
-            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-            : Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          child: Center(
+            child: loading
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
           ),
         ),
       ),

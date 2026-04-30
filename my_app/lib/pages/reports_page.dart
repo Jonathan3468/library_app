@@ -89,13 +89,17 @@ class _ReportsPageState extends State<ReportsPage> {
       final query = params.entries.map((e) => '${e.key}=${e.value}').join('&');
       final res   = await ApiService.get('$endpoint?$query');
       final data  = res.data;
-      setState(() {
-        _issues     = data['issues'] ?? [];
-        _totalPages = data['totalPages'] ?? 1;
-        _totalCount = data['totalCount'] ?? _issues.length;
-      });
+      if (mounted) {
+        setState(() {
+          _issues     = data['issues'] ?? [];
+          _totalPages = data['totalPages'] ?? 1;
+          _totalCount = data['totalCount'] ?? _issues.length;
+        });
+      }
     } catch (_) {
-      setState(() { _error = 'Failed to load issues.'; _issues = []; });
+      if (mounted) {
+        setState(() { _error = 'Failed to load issues.'; _issues = []; });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -111,9 +115,14 @@ class _ReportsPageState extends State<ReportsPage> {
       setState(() => _searchingBorrower = true);
       try {
         final res = await ApiService.get('/borrowers/search?q=$val');
-        setState(() { _borrowerResults = res.data['borrowers'] ?? []; _showBorrowerDrop = true; });
-      } catch (_) { setState(() => _borrowerResults = []); }
-      finally { if (mounted) setState(() => _searchingBorrower = false); }
+        if (mounted) {
+          setState(() { _borrowerResults = res.data['borrowers'] ?? []; _showBorrowerDrop = true; });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _borrowerResults = []);
+      } finally {
+        if (mounted) setState(() => _searchingBorrower = false);
+      }
     });
   }
 
@@ -125,9 +134,14 @@ class _ReportsPageState extends State<ReportsPage> {
       setState(() => _searchingBook = true);
       try {
         final res = await ApiService.get('/search?q=${Uri.encodeComponent(val)}');
-        setState(() { _bookResults = res.data['results']?['books'] ?? []; _showBookDrop = true; });
-      } catch (_) { setState(() => _bookResults = []); }
-      finally { if (mounted) setState(() => _searchingBook = false); }
+        if (mounted) {
+          setState(() { _bookResults = res.data['results']?['books'] ?? []; _showBookDrop = true; });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _bookResults = []);
+      } finally {
+        if (mounted) setState(() => _searchingBook = false);
+      }
     });
   }
 
@@ -174,10 +188,14 @@ class _ReportsPageState extends State<ReportsPage> {
     try {
       await ApiService.post('/notifications/send-manual/$issueId', data: {'type': 'overdue'});
       if (mounted) _showSnack('Notification sent');
-    } catch (_) { if (mounted) _showSnack('Failed to send notification'); }
+    } catch (_) { 
+      if (mounted) _showSnack('Failed to send notification');
+    }
   }
 
   Future<void> _calculateFines() async {
+    if (!mounted) return;
+    
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -195,12 +213,25 @@ class _ReportsPageState extends State<ReportsPage> {
         ],
       ),
     );
+    
+    if (!mounted) return;
     if (confirmed != true) return;
-    try { await ApiService.post('/fines/calculate-overdue'); _fetchIssues(); } catch (_) {}
+    
+    try {
+      await ApiService.post('/fines/calculate-overdue');
+      if (mounted) {
+        _showSnack('Fines calculated successfully');
+        _fetchIssues();
+      }
+    } catch (_) {
+      if (mounted) _showSnack('Failed to calculate fines');
+    }
   }
 
-  void _showSnack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
 
   String _fmt(dynamic d) {
     if (d == null) return '—';

@@ -1,9 +1,13 @@
 // lib/services/api.dart
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 
 class ApiService {
-  // Store token here directly — breaks the circular import with auth.dart
   static String? _authToken;
+
+  // Assign this in main.dart and pass to GoRouter/MaterialApp
+  // so the interceptor can navigate without a BuildContext.
+  static GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   static final Dio _dio = Dio(
     BaseOptions(
@@ -14,19 +18,16 @@ class ApiService {
 
   static Dio get dio => _dio;
 
-  // Called by AuthService after login
   static void setAuthToken(String token) {
     _authToken = token;
     _dio.options.headers["Authorization"] = "Bearer $token";
   }
 
-  // Called by AuthService on logout
   static void clearAuthToken() {
     _authToken = null;
     _dio.options.headers.remove("Authorization");
   }
 
-  // Call this in main() after AuthService.init()
   static void initInterceptor() {
     _dio.interceptors.add(
       InterceptorsWrapper(
@@ -35,6 +36,31 @@ class ApiService {
             options.headers["Authorization"] = "Bearer $_authToken";
           }
           return handler.next(options);
+        },
+        onError: (DioException e, handler) async {
+          if (e.response?.statusCode == 401) {
+            // Clear token immediately so no further requests go out
+            // with a dead token while the redirect is in flight.
+            clearAuthToken();
+
+            // Navigate to login from anywhere in the app without needing
+            // a BuildContext — works inside services, background fetches, etc.
+            final ctx = navigatorKey.currentContext;
+            if (ctx != null && ctx.mounted) {
+              // GoRouter
+              // GoRouter.of(ctx).go('/login');
+
+              // If you're using Navigator directly:
+              navigatorKey.currentState
+                  ?.pushNamedAndRemoveUntil('/login', (_) => false);
+            }
+
+            // Reject the error so callers get a proper DioException,
+            // not a silent null — lets individual screens handle it too
+            // if needed.
+            return handler.reject(e);
+          }
+          return handler.next(e);
         },
       ),
     );

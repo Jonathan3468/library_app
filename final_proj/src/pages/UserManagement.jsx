@@ -22,6 +22,7 @@ const ICONS = {
   rfid:    "M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18",
   key:     "M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z",
   check:   "M5 13l4 4L19 7",
+  warning: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
 };
 
 // ── Role badge ────────────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ function ConfirmModal({ open, onClose, onConfirm, title, description, confirmLab
 }
 
 // ── Password input ────────────────────────────────────────────────────────────
-function PasswordInput({ value, onChange, placeholder = "Password", required = false, label }) {
+function PasswordInput({ value, onChange, placeholder = "Password", required = false, label, error }) {
   const [show, setShow] = useState(false);
   return (
     <div>
@@ -73,15 +74,24 @@ function PasswordInput({ value, onChange, placeholder = "Password", required = f
           onChange={onChange}
           placeholder={placeholder}
           required={required}
-          className="w-full border border-gray-200 rounded-lg px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+          className={`w-full border rounded-lg px-3 py-2.5 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 ${error ? "border-red-300 bg-red-50" : "border-gray-200"}`}
         />
         <button type="button" onClick={() => setShow(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition">
           <Ic d={show ? ICONS.eyeOff : ICONS.eye} className="w-4 h-4" />
         </button>
       </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
   );
 }
+
+// ── Spinner ───────────────────────────────────────────────────────────────────
+const Spinner = () => (
+  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+  </svg>
+);
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function UserManagement() {
@@ -99,12 +109,15 @@ export default function UserManagement() {
   const [editModal, setEditModal]       = useState({ open: false, user: null });
   const [deleteModal, setDeleteModal]   = useState({ open: false, user: null, loading: false });
   const [roleModal, setRoleModal]       = useState({ open: false, user: null, newRole: "" });
-  const [createModal, setCreateModal]   = useState({ open: false, borrower: null }); // NEW
+  const [createModal, setCreateModal]   = useState({ open: false, borrower: null });
+  const [passwordModal, setPasswordModal] = useState({ open: false, user: null, loading: false });
 
   // Form state
-  const [rfIdForm, setRfIdForm]   = useState({ rf_id: "", phone: "", address: "" });
-  const [editForm, setEditForm]   = useState({ rf_id: "", phone: "", address: "" });
-  const [createForm, setCreateForm] = useState({ email: "", password: "", confirmPassword: "" }); // NEW
+  const [rfIdForm, setRfIdForm]     = useState({ rf_id: "", phone: "", address: "" });
+  const [editForm, setEditForm]     = useState({ rf_id: "", phone: "", address: "" });
+  const [createForm, setCreateForm] = useState({ email: "", password: "", confirmPassword: "" });
+  const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
+  const [passwordErrors, setPasswordErrors] = useState({ field: null, server: null });
 
   useEffect(() => { fetchUsers(); }, []);
   useEffect(() => { if (activeTab === "unlinked") fetchUnlinkedBorrowers(); }, [activeTab]);
@@ -123,7 +136,6 @@ export default function UserManagement() {
     try {
       const res = await API.get("/borrowers");
       const all = Array.isArray(res.data) ? res.data : [];
-      // Borrowers with no linked user_id
       setBorrowers(all.filter(b => !b.user_id));
     } catch { toast.error("Failed to load borrowers"); }
     finally { setBorrowersLoading(false); }
@@ -151,7 +163,7 @@ export default function UserManagement() {
     );
   }, [borrowers, search]);
 
-  // ── Handlers: Users tab ────────────────────────────────────────────────────
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleAssignRfId = async (e) => {
     e.preventDefault();
     try {
@@ -208,7 +220,6 @@ export default function UserManagement() {
     } catch (err) { toast.error(err.response?.data?.error || "Failed to change role"); }
   };
 
-  // ── Handler: Create account for existing borrower ─────────────────────────
   const handleCreateAccount = async (e) => {
     e.preventDefault();
     if (createForm.password !== createForm.confirmPassword) {
@@ -231,6 +242,44 @@ export default function UserManagement() {
     } catch (err) { toast.error(err.response?.data?.error || "Failed to create account"); }
   };
 
+  // ── Admin: change another user's password ──────────────────────────────────
+  const validatePasswordForm = () => {
+    const { newPassword, confirmPassword } = passwordForm;
+    if (!newPassword) return "New password is required.";
+    if (newPassword.length < 8) return "Password must be at least 8 characters.";
+    if (!/[A-Z]/.test(newPassword)) return "Include at least one uppercase letter.";
+    if (!/[0-9]/.test(newPassword)) return "Include at least one number.";
+    if (newPassword !== confirmPassword) return "Passwords do not match.";
+    return null;
+  };
+
+  const handleAdminChangePassword = async (e) => {
+    e.preventDefault();
+    const fieldErr = validatePasswordForm();
+    if (fieldErr) { setPasswordErrors({ field: fieldErr, server: null }); return; }
+
+    setPasswordModal(m => ({ ...m, loading: true }));
+    setPasswordErrors({ field: null, server: null });
+    try {
+      await API.put(`/auth/users/${passwordModal.user.id}/password`, {
+        new_password: passwordForm.newPassword,
+      });
+      toast.success(`Password updated for ${passwordModal.user.name}`);
+      setPasswordModal({ open: false, user: null, loading: false });
+      setPasswordForm({ newPassword: "", confirmPassword: "" });
+    } catch (err) {
+      const msg = err.response?.data?.error || err.response?.data?.message || "Something went wrong. Please try again.";
+      setPasswordErrors({ field: null, server: msg });
+      setPasswordModal(m => ({ ...m, loading: false }));
+    }
+  };
+
+  const openPasswordModal = (user) => {
+    setPasswordForm({ newPassword: "", confirmPassword: "" });
+    setPasswordErrors({ field: null, server: null });
+    setPasswordModal({ open: true, user, loading: false });
+  };
+
   // ── Tabs config ────────────────────────────────────────────────────────────
   const TABS = [
     { id: "users",    label: "Users",              count: users.length,     icon: ICONS.users },
@@ -251,16 +300,13 @@ export default function UserManagement() {
 
         {/* Tabs + Search bar */}
         <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4 flex flex-wrap items-center gap-3">
-          {/* Tabs */}
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
             {TABS.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => { setActiveTab(tab.id); setSearch(""); }}
                 className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
-                  activeTab === tab.id
-                    ? "bg-white text-gray-800 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
+                  activeTab === tab.id ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"
                 }`}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -272,7 +318,6 @@ export default function UserManagement() {
             ))}
           </div>
 
-          {/* Search */}
           <div className="relative flex-1 min-w-[200px]">
             <Ic d={ICONS.search} className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
@@ -295,8 +340,7 @@ export default function UserManagement() {
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
             {loading ? (
               <div className="py-16 flex items-center justify-center text-gray-400 text-sm gap-2">
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                Loading...
+                <Spinner /> Loading...
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -309,96 +353,113 @@ export default function UserManagement() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {filteredUsers.map(user => (
-                      <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                    {filteredUsers.map(user => {
+                      // Admins can reset passwords for librarians and members, not other admins
+                      const canResetPassword = user.role !== "admin";
 
-                        {/* User */}
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <Avatar name={user.name} gradient={user.role === "admin" ? "from-red-400 to-rose-500" : user.role === "librarian" ? "from-blue-400 to-indigo-500" : "from-emerald-400 to-teal-500"} />
-                            <div>
-                              <p className="font-semibold text-gray-800 text-sm">{user.name}</p>
-                              <p className="text-xs text-gray-400">{user.email}</p>
+                      return (
+                        <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+
+                          {/* User */}
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <Avatar name={user.name} gradient={user.role === "admin" ? "from-red-400 to-rose-500" : user.role === "librarian" ? "from-blue-400 to-indigo-500" : "from-emerald-400 to-teal-500"} />
+                              <div>
+                                <p className="font-semibold text-gray-800 text-sm">{user.name}</p>
+                                <p className="text-xs text-gray-400">{user.email}</p>
+                              </div>
                             </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        {/* Role — inline select */}
-                        <td className="px-4 py-3.5">
-                          <select
-                            value={user.role}
-                            onChange={e => setRoleModal({ open: true, user, newRole: e.target.value })}
-                            className={`text-xs font-semibold px-2.5 py-1 rounded-full border-0 cursor-pointer appearance-none focus:outline-none focus:ring-2 focus:ring-blue-200 ${roleBadge(user.role)}`}
-                          >
-                            <option value="admin">Admin</option>
-                            <option value="librarian">Librarian</option>
-                            <option value="member">Member</option>
-                          </select>
-                        </td>
-
-                        {/* Active toggle */}
-                        <td className="px-4 py-3.5">
-                          <button
-                            onClick={() => handleToggleActive(user)}
-                            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition ${
-                              user.is_active
-                                ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                                : "bg-red-50 text-red-600 hover:bg-red-100"
-                            }`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? "bg-emerald-500" : "bg-red-500"}`} />
-                            {user.is_active ? "Active" : "Inactive"}
-                          </button>
-                        </td>
-
-                        {/* Borrower profile */}
-                        <td className="px-4 py-3.5">
-                          {user.borrower ? (
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded">
-                                {user.borrower.rf_id || "No RF ID"}
-                              </span>
-                              <button
-                                onClick={() => navigate(`/borrowers/${user.borrower.borrower_id}`)}
-                                className="text-xs text-blue-600 hover:underline"
-                              >
-                                View
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => { setAssignModal({ open: true, user }); setRfIdForm({ rf_id: "", phone: "", address: "" }); }}
-                              className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition"
+                          {/* Role — inline select */}
+                          <td className="px-4 py-3.5">
+                            <select
+                              value={user.role}
+                              onChange={e => setRoleModal({ open: true, user, newRole: e.target.value })}
+                              className={`text-xs font-semibold px-2.5 py-1 rounded-full border-0 cursor-pointer appearance-none focus:outline-none focus:ring-2 focus:ring-blue-200 ${roleBadge(user.role)}`}
                             >
-                              <Ic d={ICONS.rfid} className="w-3.5 h-3.5" />
-                              Assign RF ID
-                            </button>
-                          )}
-                        </td>
+                              <option value="admin">Admin</option>
+                              <option value="librarian">Librarian</option>
+                              <option value="member">Member</option>
+                            </select>
+                          </td>
 
-                        {/* Actions */}
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-1">
-                            {user.borrower && (
+                          {/* Active toggle */}
+                          <td className="px-4 py-3.5">
+                            <button
+                              onClick={() => handleToggleActive(user)}
+                              className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition ${
+                                user.is_active
+                                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                  : "bg-red-50 text-red-600 hover:bg-red-100"
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? "bg-emerald-500" : "bg-red-500"}`} />
+                              {user.is_active ? "Active" : "Inactive"}
+                            </button>
+                          </td>
+
+                          {/* Borrower profile */}
+                          <td className="px-4 py-3.5">
+                            {user.borrower ? (
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded">
+                                  {user.borrower.rf_id || "No RF ID"}
+                                </span>
+                                <button
+                                  onClick={() => navigate(`/borrowers/${user.borrower.borrower_id}`)}
+                                  className="text-xs text-blue-600 hover:underline"
+                                >
+                                  View
+                                </button>
+                              </div>
+                            ) : (
                               <button
-                                onClick={() => { setEditModal({ open: true, user }); setEditForm({ rf_id: user.borrower.rf_id || "", phone: user.borrower.phone || "", address: user.borrower.address || "" }); }}
-                                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                                title="Edit borrower"
+                                onClick={() => { setAssignModal({ open: true, user }); setRfIdForm({ rf_id: "", phone: "", address: "" }); }}
+                                className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-600 transition"
                               >
-                                <Ic d={ICONS.edit} />
+                                <Ic d={ICONS.rfid} className="w-3.5 h-3.5" />
+                                Assign RF ID
                               </button>
                             )}
-                            <button
-                              onClick={() => setDeleteModal({ open: true, user, loading: false })}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                              title="Delete user"
-                            >
-                              <Ic d={ICONS.trash} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-1">
+                              {user.borrower && (
+                                <button
+                                  onClick={() => { setEditModal({ open: true, user }); setEditForm({ rf_id: user.borrower.rf_id || "", phone: user.borrower.phone || "", address: user.borrower.address || "" }); }}
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                                  title="Edit borrower"
+                                >
+                                  <Ic d={ICONS.edit} />
+                                </button>
+                              )}
+
+                              {/* ── Admin: reset password button ── */}
+                              {canResetPassword && (
+                                <button
+                                  onClick={() => openPasswordModal(user)}
+                                  className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition"
+                                  title="Reset password"
+                                >
+                                  <Ic d={ICONS.key} />
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => setDeleteModal({ open: true, user, loading: false })}
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                                title="Delete user"
+                              >
+                                <Ic d={ICONS.trash} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -428,8 +489,7 @@ export default function UserManagement() {
 
             {borrowersLoading ? (
               <div className="py-16 flex items-center justify-center text-gray-400 text-sm gap-2">
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                Loading...
+                <Spinner /> Loading...
               </div>
             ) : filteredBorrowers.length === 0 ? (
               <div className="py-16 text-center">
@@ -451,8 +511,6 @@ export default function UserManagement() {
                   <tbody className="divide-y divide-gray-50">
                     {filteredBorrowers.map(b => (
                       <tr key={b.borrower_id} className="hover:bg-gray-50 transition-colors">
-
-                        {/* Name */}
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-2.5">
                             <Avatar name={b.borrower_name} gradient="from-gray-400 to-gray-500" />
@@ -462,28 +520,18 @@ export default function UserManagement() {
                             </div>
                           </div>
                         </td>
-
-                        {/* RF ID */}
                         <td className="px-4 py-3.5">
                           {b.rf_id
                             ? <span className="font-mono text-xs bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded">{b.rf_id}</span>
                             : <span className="text-xs text-gray-300">—</span>}
                         </td>
-
-                        {/* Email */}
                         <td className="px-4 py-3.5 text-xs text-gray-600">{b.email || <span className="text-gray-300">—</span>}</td>
-
-                        {/* Phone */}
                         <td className="px-4 py-3.5 text-xs text-gray-600">{b.phone || <span className="text-gray-300">—</span>}</td>
-
-                        {/* Membership */}
                         <td className="px-4 py-3.5">
-                          {b.membership_expiry ? (
-                            <p className="text-xs text-gray-500">{new Date(b.membership_expiry).toLocaleDateString()}</p>
-                          ) : <span className="text-gray-300 text-xs">—</span>}
+                          {b.membership_expiry
+                            ? <p className="text-xs text-gray-500">{new Date(b.membership_expiry).toLocaleDateString()}</p>
+                            : <span className="text-gray-300 text-xs">—</span>}
                         </td>
-
-                        {/* Create account */}
                         <td className="px-4 py-3.5">
                           <button
                             onClick={() => {
@@ -581,8 +629,6 @@ export default function UserManagement() {
               <p className="text-xs text-gray-400 mt-0.5">Linking a login account to an existing borrower</p>
             </div>
             <form onSubmit={handleCreateAccount} className="px-6 py-5 space-y-4">
-
-              {/* Borrower info card */}
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-3.5 flex items-center gap-3">
                 <Avatar name={createModal.borrower?.borrower_name} size="w-9 h-9" text="text-sm" gradient="from-gray-400 to-gray-500" />
                 <div>
@@ -593,53 +639,102 @@ export default function UserManagement() {
                   </p>
                 </div>
               </div>
-
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1.5">Email <span className="text-red-400">*</span></label>
-                <input
-                  type="email"
-                  value={createForm.email}
-                  onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))}
-                  required
-                  autoFocus
-                  placeholder="member@email.com"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
+                <input type="email" value={createForm.email} onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))} required autoFocus placeholder="member@email.com" className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
               </div>
-
-              <PasswordInput
-                label="Password"
-                value={createForm.password}
-                onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))}
-                required
-                placeholder="Min. 8 characters"
-              />
-
-              <PasswordInput
-                label="Confirm Password"
-                value={createForm.confirmPassword}
-                onChange={e => setCreateForm(f => ({ ...f, confirmPassword: e.target.value }))}
-                required
-                placeholder="Repeat password"
-              />
-
+              <PasswordInput label="Password" value={createForm.password} onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))} required placeholder="Min. 8 characters" />
+              <PasswordInput label="Confirm Password" value={createForm.confirmPassword} onChange={e => setCreateForm(f => ({ ...f, confirmPassword: e.target.value }))} required placeholder="Repeat password" />
               {createForm.password && createForm.confirmPassword && createForm.password !== createForm.confirmPassword && (
                 <p className="text-xs text-red-500 -mt-2">Passwords do not match</p>
               )}
-
               <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
                 <p className="text-xs text-emerald-700">
                   This will create a <strong>member</strong> account and link it to <strong>{createModal.borrower?.borrower_name}</strong>'s borrower profile. They can log in immediately.
                 </p>
               </div>
+              <div className="flex gap-2 pt-1">
+                <button type="submit" className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 transition">Create Account</button>
+                <button type="button" onClick={() => { setCreateModal({ open: false, borrower: null }); setCreateForm({ email: "", password: "", confirmPassword: "" }); }} className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-200 transition">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Admin: Reset Password Modal ── */}
+      {passwordModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPasswordModal({ open: false, user: null, loading: false })}>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
+              <div className="w-9 h-9 bg-violet-50 rounded-xl flex items-center justify-center shrink-0">
+                <Ic d={ICONS.key} className="w-4 h-4 text-violet-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-gray-800">Reset Password</h3>
+                <p className="text-xs text-gray-400 truncate">Set a new password for <span className="font-semibold text-gray-600">{passwordModal.user?.name}</span></p>
+              </div>
+              <button onClick={() => setPasswordModal({ open: false, user: null, loading: false })} className="text-gray-300 hover:text-gray-500 transition">
+                <Ic d={ICONS.x} className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAdminChangePassword} className="px-6 py-5 space-y-4">
+
+              {/* Warning */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 flex gap-2">
+                <Ic d={ICONS.warning} className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700">The user will need to use this new password to sign in. Consider informing them directly.</p>
+              </div>
+
+              {/* Server error */}
+              {passwordErrors.server && (
+                <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 flex gap-2">
+                  <Ic d={ICONS.x} className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600">{passwordErrors.server}</p>
+                </div>
+              )}
+
+              <PasswordInput
+                label="New Password"
+                required
+                value={passwordForm.newPassword}
+                onChange={e => { setPasswordForm(f => ({ ...f, newPassword: e.target.value })); setPasswordErrors({ field: null, server: null }); }}
+                placeholder="Min. 8 characters"
+                error={passwordErrors.field && passwordForm.newPassword === "" ? passwordErrors.field : null}
+              />
+
+              <PasswordInput
+                label="Confirm New Password"
+                required
+                value={passwordForm.confirmPassword}
+                onChange={e => { setPasswordForm(f => ({ ...f, confirmPassword: e.target.value })); setPasswordErrors({ field: null, server: null }); }}
+                placeholder="Repeat password"
+                error={passwordErrors.field && passwordForm.confirmPassword !== "" && passwordForm.newPassword !== passwordForm.confirmPassword
+                  ? "Passwords do not match."
+                  : passwordErrors.field && passwordForm.confirmPassword === "" ? null : null}
+              />
+
+              {/* Unified field error (non-match or rule failures) */}
+              {passwordErrors.field && (
+                <p className="text-xs text-red-500 -mt-2">{passwordErrors.field}</p>
+              )}
+
+              <p className="text-xs text-gray-400">Min. 8 characters · 1 uppercase letter · 1 number</p>
 
               <div className="flex gap-2 pt-1">
-                <button type="submit" className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 transition">
-                  Create Account
+                <button
+                  type="submit"
+                  disabled={passwordModal.loading}
+                  className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2"
+                >
+                  {passwordModal.loading ? <><Spinner /> Saving...</> : "Set New Password"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setCreateModal({ open: false, borrower: null }); setCreateForm({ email: "", password: "", confirmPassword: "" }); }}
+                  onClick={() => setPasswordModal({ open: false, user: null, loading: false })}
                   className="flex-1 bg-gray-100 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-200 transition"
                 >
                   Cancel

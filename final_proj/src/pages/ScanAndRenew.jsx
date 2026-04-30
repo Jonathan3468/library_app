@@ -40,26 +40,7 @@ const ICONS = {
 
 // ── Camera Button ─────────────────────────────────────────────────────────────
 // Small button to open the scanner modal, placed next to barcode inputs
-function CameraButton({ onClick, color = "blue" }) {
-  const colorMap = {
-    blue:   "bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200",
-    green:  "bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border-emerald-200",
-    orange: "bg-orange-50 hover:bg-orange-100 text-orange-600 border-orange-200",
-  };
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title="Scan with camera"
-      className={`flex items-center gap-1.5 px-3 py-2 border rounded-lg text-xs font-semibold transition shrink-0 ${colorMap[color]}`}
-    >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d={ICONS.camera} />
-      </svg>
-      Camera
-    </button>
-  );
-}
+
 
 // ── Confirm Modal ─────────────────────────────────────────────────────────────
 function ConfirmModal({ open, onClose, onConfirm, title, description, confirmLabel, confirmClass, loading, children }) {
@@ -315,29 +296,8 @@ export default function ScanAndRenew() {
   }, []);
 
   // ── Camera scan handler ───────────────────────────────────────────────────
-  // Called when ZXing successfully reads a barcode
-  const handleCameraScan = (code) => {
-    setScannerTarget(null); // close modal
-
-    if (scannerTarget === "scan-copy") {
-      setCopyCode(code);
-      setSelectedBook(null);
-      setSelectedCopy(null);
-      setBookSearch("");
-      setIsReturningMode(false);
-      setCopyCodeValidation(null);
-      toast.success(`Barcode scanned: ${code}`);
-    }
-
-    if (scannerTarget === "renew-copy") {
-      setRenewCopyCode(code);
-      setSelectedRenewBook(null);
-      setSelectedRenewCopy(null);
-      setRenewBookSearch("");
-      setRenewCopyCodeValidation(null);
-      toast.success(`Barcode scanned: ${code}`);
-    }
-  };
+ 
+  
 
   // ── Borrower search effects ───────────────────────────────────────────────
   useEffect(() => {
@@ -765,7 +725,7 @@ export default function ScanAndRenew() {
                           onChange={e => { setCopyCode(e.target.value); if (e.target.value) { setSelectedBook(null); setSelectedCopy(null); setBookSearch(""); setIsReturningMode(false); } else setCopyCodeValidation(null); }}
                           onKeyPress={e => handleKeyPress(e, "scan")}
                         />
-                        <CameraButton onClick={() => setScannerTarget("scan-copy")} color="blue" />
+                        
                       </div>
                       <ValidationMsg type={copyCodeValidation?.type} msg={copyCodeValidation?.msg} />
                     </div>
@@ -904,7 +864,7 @@ export default function ScanAndRenew() {
                       onChange={e => { setRenewCopyCode(e.target.value); if (e.target.value) { setSelectedRenewBook(null); setSelectedRenewCopy(null); setRenewBookSearch(""); } else setRenewCopyCodeValidation(null); }}
                       onKeyPress={e => handleKeyPress(e, "renew")}
                     />
-                    <CameraButton onClick={() => setScannerTarget("renew-copy")} color="green" />
+                    
                   </div>
                   <ValidationMsg type={renewCopyCodeValidation?.type} msg={renewCopyCodeValidation?.msg} />
                 </div>
@@ -930,13 +890,7 @@ export default function ScanAndRenew() {
         </div>
       </div>
 
-      {/* Camera Scanner Modal */}
-      {scannerTarget && (
-        <BarcodeScanner
-          onScan={handleCameraScan}
-          onClose={() => setScannerTarget(null)}
-        />
-      )}
+      
     </div>
   );
 }

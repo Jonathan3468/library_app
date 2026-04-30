@@ -4,8 +4,6 @@ const { Op } = require("sequelize");
 const { auth, requireLibrarian } = require("../middleware/auth.middleware");
 const { getSetting } = require("../config/librarySettings");
 
-// You'll need to add RenewalRequest to your models/index.js
-// See bottom of this file for the model definition to add
 const { RenewalRequest, Issue, Borrower, Copy, Book } = require("../models");
 
 // ── Shared include for full request details ──────────────────────────────────
@@ -44,7 +42,6 @@ router.get("/", auth, requireLibrarian, async (req, res) => {
 // ================= GET MY REQUESTS (member) =================
 router.get("/my", auth, async (req, res) => {
   try {
-    // Find borrower linked to this user
     const borrower = await Borrower.findOne({ where: { user_id: req.user.id } });
     if (!borrower) return res.json({ success: true, requests: [] });
 
@@ -74,18 +71,15 @@ router.post("/", auth, async (req, res) => {
     const { issue_id } = req.body;
     if (!issue_id) return res.status(400).json({ error: "issue_id is required" });
 
-    // Find borrower for this user
     const borrower = await Borrower.findOne({ where: { user_id: req.user.id } });
     if (!borrower) return res.status(403).json({ error: "No borrower profile found" });
 
-    // Verify the issue belongs to this borrower
     const issue = await Issue.findOne({
       where: { issue_id, borrower_id: borrower.borrower_id },
     });
     if (!issue) return res.status(404).json({ error: "Issue not found or not yours" });
     if (issue.check_in) return res.status(400).json({ error: "Book has already been returned" });
 
-    // Check no pending request already exists for this issue
     const existing = await RenewalRequest.findOne({
       where: { issue_id, status: "pending" },
     });
@@ -113,36 +107,44 @@ router.put("/:id/approve", auth, requireLibrarian, async (req, res) => {
       include: [
         {
           model: Issue,
-          include: [{ model: Borrower }]
-        }
+          include: [{ model: Borrower }],
+        },
       ],
-      transaction
+      transaction,
     });
 
-    if (!request)
+    // ✅ rollback before every early return
+    if (!request) {
+      await transaction.rollback();
       return res.status(404).json({ error: "Request not found" });
+    }
 
-    if (request.status !== "pending")
+    if (request.status !== "pending") {
+      await transaction.rollback();
       return res.status(400).json({ error: "Request is no longer pending" });
+    }
 
     const issue = request.Issue;
 
-    if (!issue || issue.check_in)
+    if (!issue || issue.check_in) {
+      await transaction.rollback();
       return res.status(400).json({ error: "Issue not found or already returned" });
+    }
 
     const borrower = issue.Borrower;
     const today = new Date();
     const warnings = [];
 
     // 1️⃣ Outstanding fines check
-    const outstandingFines = await Issue.sum("fine", {
-      where: {
-        borrower_id: borrower.borrower_id,
-        fine: { [Op.gt]: 0 },
-        fine_paid: false
-      },
-      transaction
-    }) || 0;
+    const outstandingFines =
+      (await Issue.sum("fine", {
+        where: {
+          borrower_id: borrower.borrower_id,
+          fine: { [Op.gt]: 0 },
+          fine_paid: false,
+        },
+        transaction,
+      })) || 0;
 
     if (outstandingFines > 0)
       warnings.push(`Outstanding fines: ₹${outstandingFines}`);
@@ -161,14 +163,20 @@ router.put("/:id/approve", auth, requireLibrarian, async (req, res) => {
       warnings.push(`Renew limit reached (${MAX_RENEWALS} max)`);
 
     // 4️⃣ Membership expiry check
-    if (borrower.membership_expiry && new Date(borrower.membership_expiry) < today)
+    if (
+      borrower.membership_expiry &&
+      new Date(borrower.membership_expiry) < today
+    )
       warnings.push("Membership expired");
 
-    if (warnings.length > 0)
+    // ✅ rollback before returning a 400 with warnings
+    if (warnings.length > 0) {
+      await transaction.rollback();
       return res.status(400).json({
         error: "Renewal blocked due to policy rules",
-        warnings
+        warnings,
       });
+    }
 
     // 5️⃣ Calculate new due date
     const RENEWAL_PERIOD = getSetting("RENEWAL_PERIOD_DAYS");
@@ -178,16 +186,16 @@ router.put("/:id/approve", auth, requireLibrarian, async (req, res) => {
     const newRenewCount = issue.renew_count + 1;
 
     // 6️⃣ Update issue
-    await issue.update({
-      due_date: newDue,
-      renew_count: newRenewCount
-    }, { transaction });
+    await issue.update(
+      { due_date: newDue, renew_count: newRenewCount },
+      { transaction }
+    );
 
     // 7️⃣ Update request
-    await request.update({
-      status: "approved",
-      processed_by: req.user.id
-    }, { transaction });
+    await request.update(
+      { status: "approved", processed_by: req.user.id },
+      { transaction }
+    );
 
     await transaction.commit();
 
@@ -196,9 +204,8 @@ router.put("/:id/approve", auth, requireLibrarian, async (req, res) => {
       message: "Renewal approved",
       new_due_date: newDue,
       renew_count: newRenewCount,
-      renewal_period_days: RENEWAL_PERIOD
+      renewal_period_days: RENEWAL_PERIOD,
     });
-
   } catch (err) {
     await transaction.rollback();
     console.error("APPROVE RENEWAL ERROR:", err);
@@ -206,14 +213,14 @@ router.put("/:id/approve", auth, requireLibrarian, async (req, res) => {
   }
 });
 
-
 // ================= DENY (librarian) =================
 router.put("/:id/deny", auth, requireLibrarian, async (req, res) => {
   try {
     const { notes } = req.body;
     const request = await RenewalRequest.findByPk(req.params.id);
     if (!request) return res.status(404).json({ error: "Request not found" });
-    if (request.status !== "pending") return res.status(400).json({ error: "Request is no longer pending" });
+    if (request.status !== "pending")
+      return res.status(400).json({ error: "Request is no longer pending" });
 
     await request.update({ status: "denied", notes: notes || null });
 
@@ -225,4 +232,3 @@ router.put("/:id/deny", auth, requireLibrarian, async (req, res) => {
 });
 
 module.exports = router;
-

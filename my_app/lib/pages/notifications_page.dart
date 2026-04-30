@@ -16,11 +16,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
   String? _error;
 
   Future<void> _sendOverdue() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; _result = null; });
     try {
       final res = await ApiService.post('/notifications/send-overdue');
+      if (!mounted) return;
       setState(() => _result = res.data['results'] as Map<String, dynamic>?);
     } catch (_) {
+      if (!mounted) return;
       setState(() => _error = 'Failed to send notifications. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -28,11 +31,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   Future<void> _sendReminders() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; _result = null; });
     try {
       final res = await ApiService.post('/notifications/send-reminders', data: {'daysBeforeDue': 2});
+      if (!mounted) return;
       setState(() => _result = res.data['results'] as Map<String, dynamic>?);
     } catch (_) {
+      if (!mounted) return;
       setState(() => _error = 'Failed to send reminders. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -47,9 +53,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
     required IconData icon,
     required Future<void> Function() onConfirm,
   }) async {
+    // FIX: mounted check before using context across async gap
+    if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      // FIX: use dialogContext for Navigator.pop, not the outer page context.
+      // Using the outer context caused go_router to pop the page itself
+      // instead of just the dialog, producing a black screen.
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         contentPadding: const EdgeInsets.all(24),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -63,13 +74,17 @@ class _NotificationsPageState extends State<NotificationsPage> {
             child: Icon(icon, color: confirmColor, size: 22),
           ),
           const SizedBox(height: 16),
-          Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)), textAlign: TextAlign.center),
+          Text(title,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)),
+              textAlign: TextAlign.center),
           const SizedBox(height: 6),
-          Text(description, style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)), textAlign: TextAlign.center),
+          Text(description,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              textAlign: TextAlign.center),
           const SizedBox(height: 20),
           Row(children: [
             Expanded(child: OutlinedButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(dialogContext, false),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: Color(0xFFE5E7EB)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -79,7 +94,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
             )),
             const SizedBox(width: 8),
             Expanded(child: ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(dialogContext, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: confirmColor,
                 foregroundColor: Colors.white,
@@ -93,200 +108,209 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ]),
       ),
     );
-    if (ok == true) await onConfirm();
+    // FIX: mounted check after await before calling onConfirm which will setState
+    if (!mounted || ok != true) return;
+    await onConfirm();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // FIX: SafeArea ensures content is not rendered under the status bar /
+      // notch, which can produce a black strip at the top on some devices.
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-          // ── Header ──
-          Row(children: [
-            GestureDetector(
-              onTap: () => context.go('/reports'),
-              child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.arrow_back, size: 18, color: Color(0xFF6B7280)),
-                SizedBox(width: 4),
-                Text('Back', style: TextStyle(fontSize: 14, color: Color(0xFF6B7280))),
-              ]),
-            ),
-            const SizedBox(width: 12),
-            const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
-            const SizedBox(width: 12),
-            const Text('Notification Management',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF1F2937))),
-          ]),
-          const SizedBox(height: 4),
-          const Padding(
-            padding: EdgeInsets.only(left: 60),
-            child: Text('Send email alerts to borrowers',
-                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
-          ),
-          const SizedBox(height: 20),
-
-          // ── Info box ──
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF6FF),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFBFDBFE)),
-            ),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Container(
-                width: 32, height: 32,
-                decoration: BoxDecoration(color: const Color(0xFFDBEAFE), borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.info_outline, size: 16, color: Color(0xFF2563EB)),
+            // ── Header ──
+            Row(children: [
+              GestureDetector(
+                onTap: () => context.go('/reports'),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.arrow_back, size: 18, color: Color(0xFF6B7280)),
+                  SizedBox(width: 4),
+                  Text('Back', style: TextStyle(fontSize: 14, color: Color(0xFF6B7280))),
+                ]),
               ),
               const SizedBox(width: 12),
-              const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Automated Notifications',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1E3A8A))),
-                SizedBox(height: 4),
-                Text('The system automatically sends notifications daily:',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF1D4ED8))),
-                SizedBox(height: 6),
-                _ScheduleRow(time: '8:00 AM', desc: 'Reminder emails for books due in 2 days'),
-                SizedBox(height: 3),
-                _ScheduleRow(time: '9:00 AM', desc: 'Overdue notifications for all overdue books'),
-                SizedBox(height: 6),
-                Text('You can also trigger them manually below.',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF1D4ED8))),
-              ])),
-            ]),
-          ),
-          const SizedBox(height: 16),
-
-          // ── Error ──
-          if (_error != null) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFECACA)),
+              const Text('/', style: TextStyle(color: Color(0xFFD1D5DB))),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text('Notification Management',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)),
+                    overflow: TextOverflow.ellipsis),
               ),
-              child: Row(children: [
-                Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626)))),
-                GestureDetector(
-                  onTap: () => setState(() => _error = null),
-                  child: const Text('Dismiss', style: TextStyle(fontSize: 11, color: Color(0xFFDC2626), decoration: TextDecoration.underline)),
-                ),
-              ]),
+            ]),
+            const SizedBox(height: 4),
+            const Padding(
+              padding: EdgeInsets.only(left: 60),
+              child: Text('Send email alerts to borrowers',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
             ),
-            const SizedBox(height: 12),
-          ],
+            const SizedBox(height: 20),
 
-          // ── Success result ──
-          if (_result != null) ...[
+            // ── Info box ──
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFECFDF5),
+                color: const Color(0xFFEFF6FF),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFA7F3D0)),
+                border: Border.all(color: const Color(0xFFBFDBFE)),
               ),
-              child: Row(children: [
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Container(
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(color: const Color(0xFFD1FAE5), borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.check, size: 18, color: Color(0xFF059669)),
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(color: const Color(0xFFDBEAFE), borderRadius: BorderRadius.circular(8)),
+                  child: const Icon(Icons.info_outline, size: 16, color: Color(0xFF2563EB)),
                 ),
                 const SizedBox(width: 12),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Notifications sent successfully',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF065F46))),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${_result!['emailsSent'] ?? _result!['sent'] ?? 0} email(s) sent'
-                    '${_result!['total'] != null ? ' out of ${_result!['total']} issues' : ''}'
-                    '${(_result!['failed'] ?? 0) > 0 ? ' · ${_result!['failed']} failed' : ''}',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF059669)),
-                  ),
+                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Automated Notifications',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1E3A8A))),
+                  SizedBox(height: 4),
+                  Text('The system automatically sends notifications daily:',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF1D4ED8))),
+                  SizedBox(height: 6),
+                  _ScheduleRow(time: '8:00 AM', desc: 'Reminder emails for books due in 2 days'),
+                  SizedBox(height: 3),
+                  _ScheduleRow(time: '9:00 AM', desc: 'Overdue notifications for all overdue books'),
+                  SizedBox(height: 6),
+                  Text('You can also trigger them manually below.',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF1D4ED8))),
                 ])),
               ]),
             ),
             const SizedBox(height: 16),
-          ],
 
-          // ── Action Cards ──
-          LayoutBuilder(builder: (_, constraints) {
-            final wide = constraints.maxWidth > 600;
-            final cards = [
-              _ActionCard(
-                icon: Icons.error_outline,
-                iconBg: const Color(0xFFFEF2F2),
-                iconColor: const Color(0xFFDC2626),
-                title: 'Overdue Notifications',
-                subtitle: 'For all overdue books',
-                description: 'Sends an email to every borrower who has books past their due date, reminding them to return or renew.',
-                buttonLabel: 'Send Overdue Notifications',
-                buttonColor: const Color(0xFFDC2626),
-                loading: _loading,
-                onTap: () => _confirm(
-                  title: 'Send Overdue Notifications?',
-                  description: 'An email will be sent to every borrower with books past their due date. This cannot be undone.',
-                  confirmLabel: 'Send Now',
-                  confirmColor: const Color(0xFFDC2626),
+            // ── Error ──
+            if (_error != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: Row(children: [
+                  Expanded(child: Text(_error!, style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626)))),
+                  GestureDetector(
+                    onTap: () => setState(() => _error = null),
+                    child: const Text('Dismiss', style: TextStyle(fontSize: 11, color: Color(0xFFDC2626), decoration: TextDecoration.underline)),
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // ── Success result ──
+            if (_result != null) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFECFDF5),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                ),
+                child: Row(children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(color: const Color(0xFFD1FAE5), borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.check, size: 18, color: Color(0xFF059669)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Notifications sent successfully',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF065F46))),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_result!['emailsSent'] ?? _result!['sent'] ?? 0} email(s) sent'
+                      '${_result!['total'] != null ? ' out of ${_result!['total']} issues' : ''}'
+                      '${(_result!['failed'] ?? 0) > 0 ? ' · ${_result!['failed']} failed' : ''}',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF059669)),
+                    ),
+                  ])),
+                ]),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // ── Action Cards ──
+            LayoutBuilder(builder: (_, constraints) {
+              final wide = constraints.maxWidth > 600;
+              final cards = [
+                _ActionCard(
                   icon: Icons.error_outline,
-                  onConfirm: _sendOverdue,
+                  iconBg: const Color(0xFFFEF2F2),
+                  iconColor: const Color(0xFFDC2626),
+                  title: 'Overdue Notifications',
+                  subtitle: 'For all overdue books',
+                  description: 'Sends an email to every borrower who has books past their due date, reminding them to return or renew.',
+                  buttonLabel: 'Send Overdue Notifications',
+                  buttonColor: const Color(0xFFDC2626),
+                  loading: _loading,
+                  onTap: () => _confirm(
+                    title: 'Send Overdue Notifications?',
+                    description: 'An email will be sent to every borrower with books past their due date. This cannot be undone.',
+                    confirmLabel: 'Send Now',
+                    confirmColor: const Color(0xFFDC2626),
+                    icon: Icons.error_outline,
+                    onConfirm: _sendOverdue,
+                  ),
                 ),
-              ),
-              _ActionCard(
-                icon: Icons.notifications_outlined,
-                iconBg: const Color(0xFFEFF6FF),
-                iconColor: const Color(0xFF2563EB),
-                title: 'Due Soon Reminders',
-                subtitle: 'Books due in 2 days',
-                description: 'Sends a friendly reminder to borrowers whose books are due within the next 2 days so they can plan ahead.',
-                buttonLabel: 'Send Reminder Notifications',
-                buttonColor: const Color(0xFF2563EB),
-                loading: _loading,
-                onTap: () => _confirm(
-                  title: 'Send Due Soon Reminders?',
-                  description: 'A reminder email will be sent to all borrowers with books due within 2 days.',
-                  confirmLabel: 'Send Now',
-                  confirmColor: const Color(0xFF2563EB),
+                _ActionCard(
                   icon: Icons.notifications_outlined,
-                  onConfirm: _sendReminders,
+                  iconBg: const Color(0xFFEFF6FF),
+                  iconColor: const Color(0xFF2563EB),
+                  title: 'Due Soon Reminders',
+                  subtitle: 'Books due in 2 days',
+                  description: 'Sends a friendly reminder to borrowers whose books are due within the next 2 days so they can plan ahead.',
+                  buttonLabel: 'Send Reminder Notifications',
+                  buttonColor: const Color(0xFF2563EB),
+                  loading: _loading,
+                  onTap: () => _confirm(
+                    title: 'Send Due Soon Reminders?',
+                    description: 'A reminder email will be sent to all borrowers with books due within 2 days.',
+                    confirmLabel: 'Send Now',
+                    confirmColor: const Color(0xFF2563EB),
+                    icon: Icons.notifications_outlined,
+                    onConfirm: _sendReminders,
+                  ),
                 ),
+              ];
+
+              if (wide) {
+                return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(child: cards[0]),
+                  const SizedBox(width: 12),
+                  Expanded(child: cards[1]),
+                ]);
+              }
+              return Column(children: [cards[0], const SizedBox(height: 12), cards[1]]);
+            }),
+            const SizedBox(height: 16),
+
+            // ── Note ──
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
               ),
-            ];
-
-            if (wide) {
-              return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: cards[0]),
-                const SizedBox(width: 12),
-                Expanded(child: cards[1]),
-              ]);
-            }
-            return Column(children: [cards[0], const SizedBox(height: 12), cards[1]]);
-          }),
-          const SizedBox(height: 16),
-
-          // ── Note ──
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
+              child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Icon(Icons.edit_outlined, size: 14, color: Color(0xFF9CA3AF)),
+                SizedBox(width: 10),
+                Expanded(child: Text(
+                  'Notifications are only sent to borrowers with valid email addresses. Make sure contact information is up to date for effective delivery.',
+                  style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                )),
+              ]),
             ),
-            child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(Icons.edit_outlined, size: 14, color: Color(0xFF9CA3AF)),
-              SizedBox(width: 10),
-              Expanded(child: Text(
-                'Notifications are only sent to borrowers with valid email addresses. Make sure contact information is up to date for effective delivery.',
-                style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-              )),
-            ]),
-          ),
 
-        ]),
+          ]),
+        ),
       ),
     );
   }
@@ -350,7 +374,9 @@ class _ActionCard extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1F2937))),
+            Text(title,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)),
+                overflow: TextOverflow.ellipsis),
             Text(subtitle, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
           ])),
         ]),

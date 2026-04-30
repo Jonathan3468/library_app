@@ -20,7 +20,8 @@ class _BookViewPageState extends State<BookViewPage> {
   List<dynamic> _copies = [];
   bool _loading = true;
   String? _error;
-  Uint8List? _coverBytes; // ← added
+  Uint8List? _coverBytes;
+  bool _imageError = false;
 
   @override
   void initState() {
@@ -39,7 +40,6 @@ class _BookViewPageState extends State<BookViewPage> {
         _book   = results[0].data['book'] ?? results[0].data;
         _copies = results[1].data['copies'] ?? results[1].data ?? [];
       });
-      // Load cover image after book data is ready
       await _loadCover();
     } catch (_) {
       setState(() => _error = 'Failed to load book details');
@@ -49,11 +49,35 @@ class _BookViewPageState extends State<BookViewPage> {
   }
 
   Future<void> _loadCover() async {
-    final stored = await ImageStorage.load('book', widget.bookId);
-    if (stored != null && mounted) {
+    try {
+      final stored = await ImageStorage.load('book', widget.bookId);
+      if (stored == null || !mounted) return;
       final clean = stored.contains(',') ? stored.split(',').last : stored;
-      setState(() => _coverBytes = base64Decode(clean));
+      final bytes = base64Decode(clean);
+      if (mounted) setState(() => _coverBytes = bytes);
+    } catch (_) {
+      // silently fall through to placeholder
     }
+  }
+
+  Widget _coverPlaceholder() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFFF1F5F9), Color(0xFFE2E8F0)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: const Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.menu_book_outlined, size: 32, color: Color(0xFFCBD5E1)),
+          SizedBox(height: 6),
+          Text('No Cover', style: TextStyle(fontSize: 10, color: Color(0xFFCBD5E1))),
+        ],
+      ),
+    );
   }
 
   @override
@@ -109,7 +133,6 @@ class _BookViewPageState extends State<BookViewPage> {
 
     final isMemberRole = !AuthService.isLibrarian();
     final book = _book!;
-
     final authors = (book['Authors'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final genres  = (book['Genres']  as List?)?.cast<Map<String, dynamic>>() ?? [];
 
@@ -171,7 +194,6 @@ class _BookViewPageState extends State<BookViewPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Cover + metadata side by side
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -184,24 +206,21 @@ class _BookViewPageState extends State<BookViewPage> {
                             boxShadow: const [BoxShadow(color: Color(0x18000000), blurRadius: 8, offset: Offset(2, 4))],
                           ),
                           clipBehavior: Clip.hardEdge,
-                          child: _coverBytes != null
-                              ? Image.memory(_coverBytes!, fit: BoxFit.cover, width: 110, height: 165)
-                              : Container(
-                                  decoration: const BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [Color(0xFFF1F5F9), Color(0xFFE2E8F0)],
-                                      begin: Alignment.topLeft, end: Alignment.bottomRight,
-                                    ),
-                                  ),
-                                  child: const Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.menu_book_outlined, size: 32, color: Color(0xFFCBD5E1)),
-                                      SizedBox(height: 6),
-                                      Text('No Cover', style: TextStyle(fontSize: 10, color: Color(0xFFCBD5E1))),
-                                    ],
-                                  ),
-                                ),
+                          child: _coverBytes != null && !_imageError
+                              ? Image.memory(
+                                  _coverBytes!,
+                                  fit: BoxFit.cover,
+                                  width: 110,
+                                  height: 165,
+                                  errorBuilder: (_, __, ___) {
+                                    // Schedule state update after build
+                                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                                      if (mounted) setState(() => _imageError = true);
+                                    });
+                                    return _coverPlaceholder();
+                                  },
+                                )
+                              : _coverPlaceholder(),
                         ),
                         const SizedBox(width: 24),
 
@@ -237,7 +256,6 @@ class _BookViewPageState extends State<BookViewPage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Authors + Genres — full width below
                     const Divider(color: Color(0xFFF3F4F6)),
                     const SizedBox(height: 16),
                     Row(

@@ -457,22 +457,46 @@ export default function BorrowerDetails() {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete ${data.borrower.borrower_name}?`)) return;
-    try {
-      await API.delete(`/borrowers/${id}`);
-      toast.success("Borrower deleted");
-      navigate("/borrowers");
-    } catch (err) { toast.error(err.response?.data?.error || "Failed to delete"); }
-  };
+  toast(`Delete ${data.borrower.borrower_name}?`, {
+    description: "This action cannot be undone.",
+    action: {
+      label: "Delete",
+      onClick: async () => {
+        try {
+          await API.delete(`/borrowers/${id}`);
+          toast.success("Borrower deleted successfully");
+          navigate("/borrowers");
+        } catch (err) {
+          toast.error(err.response?.data?.error || "Failed to delete");
+        }
+      },
+    },
+    cancel: {
+      label: "Cancel",
+    },
+  });
+};
 
   const handleRenewMembership = async () => {
-    if (!window.confirm(`Renew membership for ${data.borrower.borrower_name}?`)) return;
-    try {
-      const res = await API.put(`/borrowers/renew/${id}`);
-      toast.success(`Renewed · Expiry: ${new Date(res.data.new_expiry_date).toLocaleDateString()}`);
-      fetchBorrowerDetails();
-    } catch (err) { toast.error(err.response?.data?.error || "Failed to renew"); }
-  };
+  toast(`Renew membership for ${data.borrower.borrower_name}?`, {
+    description: "This will extend their membership by 1 year.",
+    action: {
+      label: "Renew",
+      onClick: async () => {
+        try {
+          const res = await API.put(`/borrowers/renew/${id}`);
+          toast.success(`Renewed · Expiry: ${new Date(res.data.new_expiry_date).toLocaleDateString()}`);
+          fetchBorrowerDetails();
+        } catch (err) {
+          toast.error(err.response?.data?.error || "Failed to renew");
+        }
+      },
+    },
+    cancel: {
+      label: "Cancel",
+    },
+  });
+};
 
   const isExpired = (date) => new Date(date) < new Date();
 

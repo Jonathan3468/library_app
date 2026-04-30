@@ -32,19 +32,16 @@ class _BooksPageState extends State<BooksPage> {
   String _sortBy      = 'title';
   String _order       = 'ASC';
 
-  // Filter selections
   List<dynamic> _selectedCategories = [];
   List<dynamic> _selectedGenres     = [];
   List<dynamic> _selectedAuthors    = [];
   List<dynamic> _selectedPublishers = [];
 
-  // Filter options
   List<dynamic> _allCategories = [];
   List<dynamic> _allGenres     = [];
   List<dynamic> _allAuthors    = [];
   List<dynamic> _allPublishers = [];
 
-  // Debounce timer
   DateTime? _lastSearchTime;
 
   int get _activeFilterCount =>
@@ -497,6 +494,7 @@ class _BookCardState extends State<_BookCard> with SingleTickerProviderStateMixi
   late final AnimationController _ctrl;
   late final Animation<double> _float;
   Uint8List? _coverBytes;
+  bool _imageError = false;
 
   @override
   void initState() {
@@ -509,15 +507,30 @@ class _BookCardState extends State<_BookCard> with SingleTickerProviderStateMixi
   Future<void> _loadCover() async {
     final id = widget.book['book_id'];
     if (id == null) return;
-    final stored = await ImageStorage.load('book', id);
-    if (stored != null && mounted) {
+    try {
+      final stored = await ImageStorage.load('book', id);
+      if (stored == null || !mounted) return;
       final clean = stored.contains(',') ? stored.split(',').last : stored;
-      setState(() => _coverBytes = base64Decode(clean));
+      final bytes = base64Decode(clean);
+      if (mounted) setState(() => _coverBytes = bytes);
+    } catch (_) {
+      // silently fall through to placeholder
     }
   }
 
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  Widget _placeholder() {
+    return const Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.menu_book_outlined, size: 36, color: Color(0xFFCBD5E1)),
+        SizedBox(height: 4),
+        Text('No Cover', style: TextStyle(fontSize: 10, color: Color(0xFFCBD5E1))),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -550,16 +563,17 @@ class _BookCardState extends State<_BookCard> with SingleTickerProviderStateMixi
                 child: Container(
                   width: double.infinity,
                   color: const Color(0xFFF1F5F9),
-                  child: _coverBytes != null
-                      ? Image.memory(_coverBytes!, fit: BoxFit.cover, width: double.infinity)
-                      : const Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.menu_book_outlined, size: 36, color: Color(0xFFCBD5E1)),
-                            SizedBox(height: 4),
-                            Text('No Cover', style: TextStyle(fontSize: 10, color: Color(0xFFCBD5E1))),
-                          ],
-                        ),
+                  child: _coverBytes != null && !_imageError
+                      ? Image.memory(
+                          _coverBytes!,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          errorBuilder: (_, __, ___) {
+                            _imageError = true;
+                            return _placeholder();
+                          },
+                        )
+                      : _placeholder(),
                 ),
               ),
               // Info

@@ -27,8 +27,15 @@ class _FinesPageState extends State<FinesPage> {
   Map<String, dynamic>? _selFine;
   String _paymentMethod     = 'cash';
 
+  // ── Payment modal state ─────────────────────────────────────────────────
+  bool _payLoading          = false;
+  String? _payError;
+
   // ── Custom fine modal ───────────────────────────────────────────────────
   bool _showCustomModal        = false;
+  String? _customError;
+  bool _submitting             = false;
+
   final _borrowerCtrl          = TextEditingController();
   final _amountCtrl            = TextEditingController();
   final _reasonCtrl            = TextEditingController();
@@ -79,19 +86,24 @@ class _FinesPageState extends State<FinesPage> {
   // ── Data ─────────────────────────────────────────────────────────────────
 
   Future<void> _fetchTab() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = null; });
     try {
       if (_tab == 0) {
         final res = await ApiService.get('/fines/outstanding');
+        if (!mounted) return;
         setState(() => _fines = res.data['issues'] ?? []);
       } else if (_tab == 1) {
         final res = await ApiService.get('/fines/history');
+        if (!mounted) return;
         setState(() => _history = res.data['history'] ?? []);
       } else {
         final res = await ApiService.get('/fines/stats');
+        if (!mounted) return;
         setState(() => _stats = res.data['stats']);
       }
     } catch (_) {
+      if (!mounted) return;
       setState(() => _error = 'Failed to load data');
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -111,25 +123,37 @@ class _FinesPageState extends State<FinesPage> {
   }
 
   Future<void> _lookupRfId(String rfId) async {
+    if (!mounted) return;
     setState(() => _searchingBorrower = true);
     try {
       final res = await ApiService.get('/borrowers/rf/$rfId');
+      if (!mounted) return;
       if (res.data['borrower'] != null) _selectBorrower(res.data['borrower']);
       else _searchBorrowers(rfId);
-    } catch (_) { _searchBorrowers(rfId); }
-    finally { if (mounted) setState(() => _searchingBorrower = false); }
+    } catch (_) {
+      if (!mounted) return;
+      _searchBorrowers(rfId);
+    } finally {
+      if (mounted) setState(() => _searchingBorrower = false);
+    }
   }
 
   Future<void> _searchBorrowers(String q) async {
+    if (!mounted) return;
     setState(() => _searchingBorrower = true);
     try {
       final res = await ApiService.get('/borrowers/search?q=$q');
+      if (!mounted) return;
       setState(() { _borrowerResults = res.data['borrowers'] ?? []; _showBorrowerDrop = true; });
-    } catch (_) {}
-    finally { if (mounted) setState(() => _searchingBorrower = false); }
+    } catch (_) {
+      if (!mounted) return;
+    } finally {
+      if (mounted) setState(() => _searchingBorrower = false);
+    }
   }
 
   void _selectBorrower(Map<String, dynamic> b) {
+    if (!mounted) return;
     setState(() {
       _selBorrower = b;
       _borrowerCtrl.text =
@@ -148,16 +172,22 @@ class _FinesPageState extends State<FinesPage> {
     _bookTimer?.cancel();
     if (val.length < 2) { setState(() { _customBooks = []; _showCustomBookDrop = false; }); return; }
     _bookTimer = Timer(const Duration(milliseconds: 300), () async {
+      if (!mounted) return;
       setState(() => _searchingCustomBook = true);
       try {
         final res = await ApiService.get('/search?q=${Uri.encodeComponent(val)}');
+        if (!mounted) return;
         setState(() { _customBooks = res.data['results']?['books'] ?? []; _showCustomBookDrop = true; });
-      } catch (_) {}
-      finally { if (mounted) setState(() => _searchingCustomBook = false); }
+      } catch (_) {
+        if (!mounted) return;
+      } finally {
+        if (mounted) setState(() => _searchingCustomBook = false);
+      }
     });
   }
 
   Future<void> _selectCustomBook(Map<String, dynamic> b) async {
+    if (!mounted) return;
     setState(() {
       _selCustomBook = b;
       _customBookCtrl.text = b['title'] ?? '';
@@ -168,8 +198,10 @@ class _FinesPageState extends State<FinesPage> {
     });
     try {
       final res = await ApiService.get('/books/${b['book_id']}/copies');
+      if (!mounted) return;
       setState(() => _customCopies = res.data['copies'] ?? []);
     } catch (_) {
+      if (!mounted) return;
       setState(() => _customCopies = []);
     } finally {
       if (mounted) setState(() => _loadingCustomCopies = false);
@@ -180,14 +212,27 @@ class _FinesPageState extends State<FinesPage> {
 
   Future<void> _pay() async {
     if (_selFine == null) return;
+    setState(() { _payLoading = true; _payError = null; });
     try {
       await ApiService.post('/fines/pay/${_selFine!['id']}', data: {
         'amount_paid': _selFine!['fine'],
         'payment_method': _paymentMethod,
       });
-      setState(() { _showPaymentModal = false; _selFine = null; });
+      if (!mounted) return;
+      setState(() {
+        _showPaymentModal = false;
+        _selFine          = null;
+        _payLoading       = false;
+        _payError         = null;
+      });
       _fetchTab();
-    } catch (_) { _showSnack('Payment failed'); }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _payLoading = false;
+        _payError   = 'Payment failed. Please try again.';
+      });
+    }
   }
 
   Future<void> _waive(dynamic id, dynamic fine) async {
@@ -197,11 +242,15 @@ class _FinesPageState extends State<FinesPage> {
       confirmLabel: 'Waive',
       confirmColor: const Color(0xFFF59E0B),
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     try {
       await ApiService.post('/fines/waive/$id', data: {'reason': 'Waived by librarian'});
+      if (!mounted) return;
       _fetchTab();
-    } catch (_) { _showSnack('Waive failed'); }
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Waive failed');
+    }
   }
 
   Future<void> _recalcIndividual(dynamic id) async {
@@ -211,25 +260,43 @@ class _FinesPageState extends State<FinesPage> {
       confirmLabel: 'Recalculate',
       confirmColor: const Color(0xFF6366F1),
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
     try {
       await ApiService.post('/fines/$id/recalculate');
+      if (!mounted) return;
       _fetchTab();
-    } catch (_) { _showSnack('Recalculation failed'); }
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Recalculation failed');
+    }
   }
 
   Future<void> _recalcAll(String mode) async {
     try {
       await ApiService.post('/fines/recalculate-all', data: {'mode': mode});
+      if (!mounted) return;
       setState(() => _showRecalcModal = false);
       _fetchTab();
-    } catch (_) { _showSnack('Recalculation failed'); }
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Recalculation failed');
+    }
   }
 
   Future<void> _submitCustomFine() async {
-    if (_selBorrower == null) { _showSnack('Please select a borrower'); return; }
-    if (_amountCtrl.text.trim().isEmpty) { _showSnack('Please enter an amount'); return; }
-    if (_reasonCtrl.text.trim().isEmpty) { _showSnack('Please enter a reason'); return; }
+    if (_selBorrower == null) {
+      setState(() => _customError = 'Please select a borrower');
+      return;
+    }
+    if (_amountCtrl.text.trim().isEmpty) {
+      setState(() => _customError = 'Please enter an amount');
+      return;
+    }
+    if (_reasonCtrl.text.trim().isEmpty) {
+      setState(() => _customError = 'Please enter a reason');
+      return;
+    }
+    setState(() { _submitting = true; _customError = null; });
     try {
       await ApiService.post('/fines/custom', data: {
         'borrower_id': _selBorrower!['borrower_id'],
@@ -240,20 +307,39 @@ class _FinesPageState extends State<FinesPage> {
         'link_to_copy': _linkToCopy,
         if (_selCustomCopy != null) 'copy_code': _selCustomCopy!['copy_code'],
       });
+      if (!mounted) return;
       _closeCustomModal();
       _fetchTab();
-    } catch (_) { _showSnack('Failed to add fine'); }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _customError = 'Failed to add fine. Please try again.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   void _closeCustomModal() {
+    if (!mounted) return;
     setState(() {
       _showCustomModal = false;
+      _customError     = null;
+      _submitting      = false;
       _selBorrower = null; _borrowerCtrl.clear();
       _amountCtrl.clear(); _reasonCtrl.clear();
       _markAsPaid = false; _linkToCopy = false;
       _customPayMethod = 'cash';
       _selCustomBook = null; _customBookCtrl.clear();
       _customCopies = []; _selCustomCopy = null;
+    });
+  }
+
+  void _closePaymentModal() {
+    if (!mounted) return;
+    setState(() {
+      _showPaymentModal = false;
+      _selFine          = null;
+      _payLoading       = false;
+      _payError         = null;
     });
   }
 
@@ -297,20 +383,25 @@ class _FinesPageState extends State<FinesPage> {
     required String title, required String desc,
     required String confirmLabel, required Color confirmColor,
   }) async {
+    if (!mounted) return false;
     final result = await showDialog<bool>(
       context: context,
-      builder: (_) => Dialog(
+      builder: (dialogContext) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
+            Text(title,
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                textAlign: TextAlign.center),
             const SizedBox(height: 8),
-            Text(desc, style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)), textAlign: TextAlign.center),
+            Text(desc,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+                textAlign: TextAlign.center),
             const SizedBox(height: 20),
             Row(children: [
               Expanded(child: OutlinedButton(
-                onPressed: () => Navigator.pop(context, false),
+                onPressed: () => Navigator.pop(dialogContext, false),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: Color(0xFFE5E7EB)),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -320,14 +411,15 @@ class _FinesPageState extends State<FinesPage> {
               )),
               const SizedBox(width: 10),
               Expanded(child: ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
+                onPressed: () => Navigator.pop(dialogContext, true),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: confirmColor,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   elevation: 0,
                 ),
-                child: Text(confirmLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                child: Text(confirmLabel,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
               )),
             ]),
           ]),
@@ -337,8 +429,10 @@ class _FinesPageState extends State<FinesPage> {
     return result == true;
   }
 
-  void _showSnack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
 
   String _fmt(dynamic d) {
     if (d == null) return '—';
@@ -355,28 +449,31 @@ class _FinesPageState extends State<FinesPage> {
       final isMobile = constraints.maxWidth < 700;
       return Scaffold(
         backgroundColor: const Color(0xFFF9FAFB),
+        resizeToAvoidBottomInset: false,
         body: Stack(
           children: [
-            SingleChildScrollView(
-              padding: EdgeInsets.all(isMobile ? 14 : 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(isMobile),
-                  const SizedBox(height: 16),
-                  if (_error != null) _buildErrorBanner(),
-                  _buildTabs(isMobile),
-                  const SizedBox(height: 16),
-                  if (_loading)
-                    const Center(child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(color: Color(0xFF2563EB)),
-                    ))
-                  else if (_tab == 0) _buildOutstanding(isMobile)
-                  else if (_tab == 1) _buildHistory(isMobile)
-                  else                _buildStats(),
-                  const SizedBox(height: 32),
-                ],
+            SafeArea(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.all(isMobile ? 14 : 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(isMobile),
+                    const SizedBox(height: 16),
+                    if (_error != null) _buildErrorBanner(),
+                    _buildTabs(isMobile),
+                    const SizedBox(height: 16),
+                    if (_loading)
+                      const Center(child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator(color: Color(0xFF2563EB)),
+                      ))
+                    else if (_tab == 0) _buildOutstanding(isMobile)
+                    else if (_tab == 1) _buildHistory(isMobile)
+                    else                _buildStats(),
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
             ),
             if (_showRecalcModal)  _buildRecalcModal(),
@@ -406,7 +503,7 @@ class _FinesPageState extends State<FinesPage> {
           const SizedBox(width: 8),
           Expanded(child: _headerBtn(label: 'Add Fine', icon: Icons.add_rounded,
               color: Colors.white, bg: const Color(0xFF7C3AED),
-              onTap: () => setState(() => _showCustomModal = true))),
+              onTap: () => setState(() { _showCustomModal = true; _customError = null; }))),
         ]),
       ]);
     }
@@ -425,7 +522,7 @@ class _FinesPageState extends State<FinesPage> {
       const SizedBox(width: 8),
       _headerBtn(label: 'Add Fine', icon: Icons.add_rounded,
           color: Colors.white, bg: const Color(0xFF7C3AED),
-          onTap: () => setState(() => _showCustomModal = true)),
+          onTap: () => setState(() { _showCustomModal = true; _customError = null; })),
     ]);
   }
 
@@ -503,7 +600,6 @@ class _FinesPageState extends State<FinesPage> {
           border: Border.all(color: const Color(0xFFE5E7EB)),
         ),
         child: Column(children: [
-          // Card header
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -534,7 +630,6 @@ class _FinesPageState extends State<FinesPage> {
             ]),
           ),
           const Divider(height: 1, color: Color(0xFFF3F4F6)),
-          // Info grid
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
             child: Column(children: [
@@ -569,7 +664,6 @@ class _FinesPageState extends State<FinesPage> {
               ],
             ]),
           ),
-          // Action buttons
           Container(
             padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
             decoration: const BoxDecoration(
@@ -579,6 +673,8 @@ class _FinesPageState extends State<FinesPage> {
                 setState(() {
                   _selFine = {'id': fineId, 'fine': fine['fine']};
                   _paymentMethod = 'cash';
+                  _payError      = null;
+                  _payLoading    = false;
                   _showPaymentModal = true;
                 });
               })),
@@ -683,6 +779,8 @@ class _FinesPageState extends State<FinesPage> {
                   setState(() {
                     _selFine = {'id': fineId, 'fine': fine['fine']};
                     _paymentMethod = 'cash';
+                    _payError      = null;
+                    _payLoading    = false;
                     _showPaymentModal = true;
                   });
                 }),
@@ -717,7 +815,6 @@ class _FinesPageState extends State<FinesPage> {
     final filtered = _filteredHistory();
 
     return Column(children: [
-      // Filter bar
       Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -830,7 +927,6 @@ class _FinesPageState extends State<FinesPage> {
       ),
       const SizedBox(height: 10),
 
-      // Content
       if (filtered.isEmpty)
         Container(
           padding: const EdgeInsets.all(40),
@@ -1058,295 +1154,364 @@ class _FinesPageState extends State<FinesPage> {
       {'mode': 'returned', 'label': 'Returned Books Only',  'desc': 'Already returned books',    'color': const Color(0xFF2563EB)},
       {'mode': 'all',      'label': 'All Fines',            'desc': 'Both overdue and returned', 'color': const Color(0xFF6366F1)},
     ];
-    return _modalOverlay(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
-          child: Text('Recalculate Fines',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)))),
-      const Padding(padding: EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: Text('Choose which fines to recalculate',
-              style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)))),
-      const Divider(height: 1, color: Color(0xFFF3F4F6)),
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(children: opts.map((o) => GestureDetector(
-          onTap: () => _recalcAll(o['mode'] as String),
-          child: Container(
-            width: double.infinity, margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E7EB))),
-            child: Row(children: [
-              Container(width: 10, height: 10, decoration: BoxDecoration(color: o['color'] as Color, shape: BoxShape.circle)),
-              const SizedBox(width: 12),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(o['label'] as String, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
-                Text(o['desc'] as String,  style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+    return _modalOverlay(
+      onDismiss: () => setState(() => _showRecalcModal = false),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
+            child: Text('Recalculate Fines',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)))),
+        const Padding(padding: EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Text('Choose which fines to recalculate',
+                style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)))),
+        const Divider(height: 1, color: Color(0xFFF3F4F6)),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: opts.map((o) => GestureDetector(
+            onTap: () => _recalcAll(o['mode'] as String),
+            child: Container(
+              width: double.infinity, margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E7EB))),
+              child: Row(children: [
+                Container(width: 10, height: 10, decoration: BoxDecoration(color: o['color'] as Color, shape: BoxShape.circle)),
+                const SizedBox(width: 12),
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(o['label'] as String, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
+                  Text(o['desc'] as String,  style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                ]),
               ]),
-            ]),
-          ),
-        )).toList()),
-      ),
-      Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-        child: SizedBox(width: double.infinity,
-          child: OutlinedButton(
-            onPressed: () => setState(() => _showRecalcModal = false),
-            style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Color(0xFFE5E7EB)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              padding: const EdgeInsets.symmetric(vertical: 12),
             ),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-          ),
+          )).toList()),
         ),
-      ),
-    ]));
-  }
-
-  Widget _buildPaymentModal() {
-    return _modalOverlay(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
-          child: Text('Record Payment',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)))),
-      const Divider(height: 1, color: Color(0xFFF3F4F6)),
-      Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(children: [
-          Container(
-            width: double.infinity, padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFA7F3D0)),
-            ),
-            child: Column(children: [
-              const Text('Amount to collect', style: TextStyle(fontSize: 11, color: Color(0xFF059669))),
-              const SizedBox(height: 6),
-              Text('₹${_selFine?['fine'] ?? 0}',
-                  style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: Color(0xFF065F46))),
-            ]),
-          ),
-          const SizedBox(height: 16),
-          const Align(alignment: Alignment.centerLeft,
-              child: Text('Payment Method', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
-          const SizedBox(height: 6),
-          _dropdownField<String>(
-            value: _paymentMethod,
-            items: const {'cash': 'Cash', 'card': 'Card', 'upi': 'UPI', 'online': 'Online Transfer'},
-            onChanged: (v) => setState(() => _paymentMethod = v!),
-          ),
-          const SizedBox(height: 16),
-          Row(children: [
-            Expanded(child: ElevatedButton(
-              onPressed: _pay,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF10B981),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(vertical: 12), elevation: 0,
-              ),
-              child: const Text('Confirm Payment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: OutlinedButton(
-              onPressed: () => setState(() { _showPaymentModal = false; _selFine = null; }),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+          child: SizedBox(width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () => setState(() => _showRecalcModal = false),
               style: OutlinedButton.styleFrom(
                 side: const BorderSide(color: Color(0xFFE5E7EB)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
               child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-            )),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildPaymentModal() {
+    return _modalOverlay(
+      onDismiss: _closePaymentModal,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
+            child: Text('Record Payment',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)))),
+        const Divider(height: 1, color: Color(0xFFF3F4F6)),
+        Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(children: [
+            Container(
+              width: double.infinity, padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5), borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFA7F3D0)),
+              ),
+              child: Column(children: [
+                const Text('Amount to collect', style: TextStyle(fontSize: 11, color: Color(0xFF059669))),
+                const SizedBox(height: 6),
+                Text('₹${_selFine?['fine'] ?? 0}',
+                    style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: Color(0xFF065F46))),
+              ]),
+            ),
+            const SizedBox(height: 16),
+            const Align(alignment: Alignment.centerLeft,
+                child: Text('Payment Method', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
+            const SizedBox(height: 6),
+            _dropdownField<String>(
+              value: _paymentMethod,
+              items: const {'cash': 'Cash', 'card': 'Card', 'upi': 'UPI', 'online': 'Online Transfer'},
+              onChanged: (v) => setState(() => _paymentMethod = v!),
+            ),
+            const SizedBox(height: 16),
+
+            // ── Inline error banner ─────────────────────────────────────────
+            if (_payError != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.error_outline, size: 14, color: Color(0xFFDC2626)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(_payError!,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFFDC2626)))),
+                ]),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            Row(children: [
+              Expanded(child: ElevatedButton(
+                onPressed: _payLoading ? null : _pay,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  disabledBackgroundColor: const Color(0xFF10B981).withOpacity(0.6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 12), elevation: 0,
+                ),
+                child: _payLoading
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Confirm Payment',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              )),
+              const SizedBox(width: 10),
+              Expanded(child: OutlinedButton(
+                onPressed: _payLoading ? null : _closePaymentModal,
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+              )),
+            ]),
           ]),
-        ]),
-      ),
-    ]));
+        ),
+      ]),
+    );
   }
 
   Widget _buildCustomFineModal() {
-    return _modalOverlay(scrollable: true, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
-          child: Text('Add Custom Fine',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)))),
-      const Divider(height: 1, color: Color(0xFFF3F4F6)),
-      Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _label('Borrower *'), const SizedBox(height: 6),
-          Stack(children: [
-            TextField(controller: _borrowerCtrl, onChanged: _onBorrowerChanged,
-                style: const TextStyle(fontSize: 13), decoration: _inputDec('Scan RF ID or search…')),
-            Positioned(right: 12, top: 0, bottom: 0, child: Center(child: _searchingBorrower
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF9CA3AF)))
-                : _selBorrower != null
-                    ? GestureDetector(onTap: () => setState(() { _selBorrower = null; _borrowerCtrl.clear(); }),
-                        child: const Icon(Icons.close, size: 16, color: Color(0xFFD1D5DB)))
-                    : const SizedBox.shrink())),
-          ]),
-          if (_showBorrowerDrop && _borrowerResults.isNotEmpty && _selBorrower == null)
-            _dropList(_borrowerResults,
-              title: (b) => b['borrower_name'] ?? '',
-              sub:   (b) => '#${b['borrower_id']}${b['rf_id'] != null ? ' · RF: ${b['rf_id']}' : ''}',
-              onTap: (b) => _selectBorrower(b as Map<String, dynamic>)),
-          if (_selBorrower != null) _selectedChip('${_selBorrower!['borrower_name']}'),
-          const SizedBox(height: 14),
+    return _modalOverlay(
+      onDismiss: _closeCustomModal,
+      scrollable: true,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 4),
+            child: Text('Add Custom Fine',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)))),
+        const Divider(height: 1, color: Color(0xFFF3F4F6)),
+        Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-          _label('Amount (₹) *'), const SizedBox(height: 6),
-          TextField(controller: _amountCtrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: const TextStyle(fontSize: 13), decoration: _inputDec('0.00')),
-          const SizedBox(height: 14),
-
-          _label('Reason *'), const SizedBox(height: 6),
-          TextField(controller: _reasonCtrl, maxLines: 3,
-              style: const TextStyle(fontSize: 13),
-              decoration: _inputDec('e.g. Lost book, Damaged pages…')),
-          const SizedBox(height: 14),
-
-          // Link to copy
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E7EB))),
-            child: Column(children: [
-              Row(children: [
-                Switch(value: _linkToCopy, activeColor: const Color(0xFF2563EB),
-                  onChanged: (v) => setState(() { _linkToCopy = v; if (!v) { _selCustomBook = null; _customBookCtrl.clear(); _selCustomCopy = null; _customCopies = []; } })),
-                const SizedBox(width: 8),
-                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Link to a book copy', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
-                  Text('For fines related to a specific copy', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-                ])),
-              ]),
-              if (_linkToCopy) ...[
-                const SizedBox(height: 12),
-                Stack(children: [
-                  TextField(controller: _customBookCtrl, onChanged: _onCustomBookChanged,
-                      style: const TextStyle(fontSize: 13), decoration: _inputDec('Search book by title or ISBN…')),
-                  if (_searchingCustomBook)
-                    const Positioned(right: 12, top: 0, bottom: 0,
-                        child: Center(child: SizedBox(width: 16, height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF9CA3AF))))),
+            if (_customError != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFECACA)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.error_outline, size: 14, color: Color(0xFFDC2626)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(_customError!,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFFDC2626)))),
                 ]),
-                if (_showCustomBookDrop && _customBooks.isNotEmpty && _selCustomBook == null)
-                  _dropList(_customBooks,
-                    title: (b) => b['title'] ?? '', sub: (b) => 'ISBN: ${b['isbn']}',
-                    onTap: (b) => _selectCustomBook(b as Map<String, dynamic>)),
-                if (_selCustomBook != null) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: const Color(0xFFF9FAFB),
-                        borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFE5E7EB))),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_selCustomBook!['title'] ?? '',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-                      if (_loadingCustomCopies)
-                        const Text('Loading copies…', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)))
-                      else if (_customCopies.isEmpty)
-                        const Text('No copies found', style: TextStyle(fontSize: 11, color: Color(0xFFEF4444)))
-                      else
-                        ..._customCopies.map((copy) {
-                          final isAvail = copy['status'] == 'Available';
-                          final isIssuedToSel = _selBorrower != null && copy['status'] == 'Issued' &&
-                              copy['borrower']?['borrower_id'] == _selBorrower!['borrower_id'];
-                          final clickable = isAvail || isIssuedToSel;
-                          final selected  = _selCustomCopy?['copy_id'] == copy['copy_id'];
-                          return GestureDetector(
-                            onTap: clickable ? () => setState(() => _selCustomCopy = copy as Map<String, dynamic>) : null,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: selected ? const Color(0xFFEFF6FF) : clickable ? Colors.white : const Color(0xFFF9FAFB),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: selected ? const Color(0xFF93C5FD) : const Color(0xFFE5E7EB)),
+              ),
+              const SizedBox(height: 14),
+            ],
+
+            _label('Borrower *'), const SizedBox(height: 6),
+            Stack(children: [
+              TextField(controller: _borrowerCtrl, onChanged: _onBorrowerChanged,
+                  style: const TextStyle(fontSize: 13), decoration: _inputDec('Scan RF ID or search…')),
+              Positioned(right: 12, top: 0, bottom: 0, child: Center(child: _searchingBorrower
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF9CA3AF)))
+                  : _selBorrower != null
+                      ? GestureDetector(onTap: () => setState(() { _selBorrower = null; _borrowerCtrl.clear(); }),
+                          child: const Icon(Icons.close, size: 16, color: Color(0xFFD1D5DB)))
+                      : const SizedBox.shrink())),
+            ]),
+            if (_showBorrowerDrop && _borrowerResults.isNotEmpty && _selBorrower == null)
+              _dropList(_borrowerResults,
+                title: (b) => b['borrower_name'] ?? '',
+                sub:   (b) => '#${b['borrower_id']}${b['rf_id'] != null ? ' · RF: ${b['rf_id']}' : ''}',
+                onTap: (b) => _selectBorrower(b as Map<String, dynamic>)),
+            if (_selBorrower != null) _selectedChip('${_selBorrower!['borrower_name']}'),
+            const SizedBox(height: 14),
+
+            _label('Amount (₹) *'), const SizedBox(height: 6),
+            TextField(controller: _amountCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: const TextStyle(fontSize: 13), decoration: _inputDec('0.00')),
+            const SizedBox(height: 14),
+
+            _label('Reason *'), const SizedBox(height: 6),
+            TextField(controller: _reasonCtrl, maxLines: 3,
+                style: const TextStyle(fontSize: 13),
+                decoration: _inputDec('e.g. Lost book, Damaged pages…')),
+            const SizedBox(height: 14),
+
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E7EB))),
+              child: Column(children: [
+                Row(children: [
+                  Switch(value: _linkToCopy, activeColor: const Color(0xFF2563EB),
+                    onChanged: (v) => setState(() { _linkToCopy = v; if (!v) { _selCustomBook = null; _customBookCtrl.clear(); _selCustomCopy = null; _customCopies = []; } })),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Link to a book copy', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
+                    Text('For fines related to a specific copy', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                  ])),
+                ]),
+                if (_linkToCopy) ...[
+                  const SizedBox(height: 12),
+                  Stack(children: [
+                    TextField(controller: _customBookCtrl, onChanged: _onCustomBookChanged,
+                        style: const TextStyle(fontSize: 13), decoration: _inputDec('Search book by title or ISBN…')),
+                    if (_searchingCustomBook)
+                      const Positioned(right: 12, top: 0, bottom: 0,
+                          child: Center(child: SizedBox(width: 16, height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF9CA3AF))))),
+                  ]),
+                  if (_showCustomBookDrop && _customBooks.isNotEmpty && _selCustomBook == null)
+                    _dropList(_customBooks,
+                      title: (b) => b['title'] ?? '', sub: (b) => 'ISBN: ${b['isbn']}',
+                      onTap: (b) => _selectCustomBook(b as Map<String, dynamic>)),
+                  if (_selCustomBook != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFE5E7EB))),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(_selCustomBook!['title'] ?? '',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 8),
+                        if (_loadingCustomCopies)
+                          const Text('Loading copies…', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)))
+                        else if (_customCopies.isEmpty)
+                          const Text('No copies found', style: TextStyle(fontSize: 11, color: Color(0xFFEF4444)))
+                        else
+                          ..._customCopies.map((copy) {
+                            final isAvail = copy['status'] == 'Available';
+                            final isIssuedToSel = _selBorrower != null && copy['status'] == 'Issued' &&
+                                copy['borrower']?['borrower_id'] == _selBorrower!['borrower_id'];
+                            final clickable = isAvail || isIssuedToSel;
+                            final selected  = _selCustomCopy?['copy_id'] == copy['copy_id'];
+                            return GestureDetector(
+                              onTap: clickable ? () => setState(() => _selCustomCopy = copy as Map<String, dynamic>) : null,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: selected ? const Color(0xFFEFF6FF) : clickable ? Colors.white : const Color(0xFFF9FAFB),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: selected ? const Color(0xFF93C5FD) : const Color(0xFFE5E7EB)),
+                                ),
+                                child: Row(children: [
+                                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    Text(copy['copy_code'] ?? '',
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, fontFamily: 'monospace')),
+                                    Text(
+                                      isIssuedToSel ? 'Issued to this borrower' : isAvail ? 'Available' : copy['status'],
+                                      style: TextStyle(fontSize: 10,
+                                          color: isIssuedToSel ? const Color(0xFFF97316)
+                                              : isAvail ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
+                                    ),
+                                  ])),
+                                  if (selected) const Icon(Icons.check_circle, size: 16, color: Color(0xFF2563EB)),
+                                ]),
                               ),
-                              child: Row(children: [
-                                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Text(copy['copy_code'] ?? '',
-                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, fontFamily: 'monospace')),
-                                  Text(
-                                    isIssuedToSel ? 'Issued to this borrower' : isAvail ? 'Available' : copy['status'],
-                                    style: TextStyle(fontSize: 10,
-                                        color: isIssuedToSel ? const Color(0xFFF97316)
-                                            : isAvail ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
-                                  ),
-                                ])),
-                                if (selected) const Icon(Icons.check_circle, size: 16, color: Color(0xFF2563EB)),
-                              ]),
-                            ),
-                          );
-                        }),
-                    ]),
+                            );
+                          }),
+                      ]),
+                    ),
+                  ],
+                ],
+              ]),
+            ),
+            const SizedBox(height: 12),
+
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E7EB))),
+              child: Column(children: [
+                Row(children: [
+                  Switch(value: _markAsPaid, activeColor: const Color(0xFF10B981),
+                      onChanged: (v) => setState(() => _markAsPaid = v)),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Mark as paid immediately', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
+                    Text('Borrower has already paid', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                  ])),
+                ]),
+                if (_markAsPaid) ...[
+                  const SizedBox(height: 10),
+                  _label('Payment Method'), const SizedBox(height: 6),
+                  _dropdownField<String>(
+                    value: _customPayMethod,
+                    items: const {'cash': 'Cash', 'card': 'Card', 'upi': 'UPI', 'online': 'Online Transfer'},
+                    onChanged: (v) => setState(() => _customPayMethod = v!),
                   ),
                 ],
-              ],
-            ]),
-          ),
-          const SizedBox(height: 12),
-
-          // Mark as paid
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE5E7EB))),
-            child: Column(children: [
-              Row(children: [
-                Switch(value: _markAsPaid, activeColor: const Color(0xFF10B981),
-                    onChanged: (v) => setState(() => _markAsPaid = v)),
-                const SizedBox(width: 8),
-                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Mark as paid immediately', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
-                  Text('Borrower has already paid', style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
-                ])),
               ]),
-              if (_markAsPaid) ...[
-                const SizedBox(height: 10),
-                _label('Payment Method'), const SizedBox(height: 6),
-                _dropdownField<String>(
-                  value: _customPayMethod,
-                  items: const {'cash': 'Cash', 'card': 'Card', 'upi': 'UPI', 'online': 'Online Transfer'},
-                  onChanged: (v) => setState(() => _customPayMethod = v!),
-                ),
-              ],
-            ]),
-          ),
-          const SizedBox(height: 16),
+            ),
+            const SizedBox(height: 16),
 
-          Row(children: [
-            Expanded(child: ElevatedButton(
-              onPressed: _submitCustomFine,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF7C3AED),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(vertical: 13), elevation: 0,
-              ),
-              child: const Text('Add Fine', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: OutlinedButton(
-              onPressed: _closeCustomModal,
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFE5E7EB)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(vertical: 13),
-              ),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
-            )),
+            Row(children: [
+              Expanded(child: ElevatedButton(
+                onPressed: _submitting ? null : _submitCustomFine,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  disabledBackgroundColor: const Color(0xFF7C3AED).withOpacity(0.6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 13), elevation: 0,
+                ),
+                child: _submitting
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Add Fine', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+              )),
+              const SizedBox(width: 10),
+              Expanded(child: OutlinedButton(
+                onPressed: _submitting ? null : _closeCustomModal,
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFE5E7EB)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                ),
+                child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280))),
+              )),
+            ]),
           ]),
-        ]),
-      ),
-    ]));
+        ),
+      ]),
+    );
   }
 
-  Widget _modalOverlay({required Widget child, bool scrollable = false}) {
+  Widget _modalOverlay({required Widget child, required VoidCallback onDismiss, bool scrollable = false}) {
     return GestureDetector(
-      onTap: () => setState(() { _showRecalcModal = false; _showPaymentModal = false; }),
+      onTap: onDismiss,
       child: Container(
         color: const Color(0x80000000),
-        child: Center(
-          child: GestureDetector(
-            onTap: () {},
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
-              constraints: const BoxConstraints(maxWidth: 480),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-              child: scrollable ? SingleChildScrollView(child: child) : child,
+        child: SafeArea(
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+                constraints: BoxConstraints(
+                  maxWidth: 480,
+                  maxHeight: MediaQuery.of(context).size.height * 0.85 -
+                      MediaQuery.of(context).viewInsets.bottom,
+                ),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+                child: scrollable
+                    ? SingleChildScrollView(
+                        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                        child: child,
+                      )
+                    : child,
+              ),
             ),
           ),
         ),
@@ -1392,8 +1557,11 @@ class _FinesPageState extends State<FinesPage> {
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(icon, size: 14, color: active ? Colors.white : const Color(0xFF9CA3AF)),
           const SizedBox(width: 5),
-          Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
-              color: active ? Colors.white : const Color(0xFF6B7280))),
+          Flexible(
+            child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+                color: active ? Colors.white : const Color(0xFF6B7280)),
+                overflow: TextOverflow.ellipsis),
+          ),
         ]),
       ),
     );
@@ -1470,8 +1638,12 @@ class _FinesPageState extends State<FinesPage> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFF9FAFB)))),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title(items[i]), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-              Text(sub(items[i]),   style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+              Text(title(items[i]),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis),
+              Text(sub(items[i]),
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                  overflow: TextOverflow.ellipsis),
             ]),
           ),
         ),
@@ -1490,7 +1662,11 @@ class _FinesPageState extends State<FinesPage> {
       child: Row(children: [
         const Icon(Icons.check_circle, size: 14, color: Color(0xFF10B981)),
         const SizedBox(width: 8),
-        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF065F46), fontWeight: FontWeight.w500)),
+        Expanded(
+          child: Text(label,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF065F46), fontWeight: FontWeight.w500),
+              overflow: TextOverflow.ellipsis),
+        ),
       ]),
     );
   }

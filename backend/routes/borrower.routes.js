@@ -420,6 +420,19 @@ router.delete("/:id", auth, requireAdmin, async (req, res) => {
 
     const name = borrower.borrower_name;
     const id   = borrower.borrower_id;
+
+
+    const customFines = await FinePayment.count({
+      where: { borrower_id: req.params.id, status: "pending" }
+    });
+    if (customFines > 0) return res.status(400).json({
+      error: "Cannot delete borrower with pending custom or replacement fines"
+    });
+
+    await FinePayment.destroy({ 
+      where: { borrower_id: req.params.id } 
+    });
+    
     await borrower.destroy();
 
     await log({

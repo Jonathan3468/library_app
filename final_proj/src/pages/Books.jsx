@@ -63,7 +63,6 @@ const styles = `
   }
 `;
 
-// Columns expected in the import file
 const BOOK_CSV_COLUMNS = [
   { key: "title",            label: "title",            required: true  },
   { key: "isbn",             label: "isbn",             required: true  },
@@ -73,10 +72,9 @@ const BOOK_CSV_COLUMNS = [
   { key: "category_name",    label: "category_name",    required: false },
   { key: "publication_name", label: "publication_name", required: false },
 ];
-const BOOK_CSV_KEYS = BOOK_CSV_COLUMNS.map(c => c.key);
-const REQUIRED_KEYS = BOOK_CSV_COLUMNS.filter(c => c.required).map(c => c.key);
+const BOOK_CSV_KEYS   = BOOK_CSV_COLUMNS.map(c => c.key);
+const REQUIRED_KEYS   = BOOK_CSV_COLUMNS.filter(c => c.required).map(c => c.key);
 
-// ── Parsers ─────────────────────────────────────────────────────────────────
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return { headers: [], rows: [], error: "File must have a header row and at least one data row." };
@@ -117,6 +115,182 @@ function parseExcel(buffer) {
   }
 }
 
+// ── Pill group (Categories / Genres) ────────────────────────────────────────
+// Shows chips; if > PILL_THRESHOLD items, adds an inline search to narrow them.
+const PILL_THRESHOLD = 8;
+
+function PillFilterGroup({ label, items, selected, onToggle, idField, nameField, accentColor }) {
+  const [q, setQ] = useState("");
+  const getId   = item => item[idField]   || item.id;
+  const getName = item => item[nameField] || item.name;
+
+  const visible = q.trim()
+    ? items.filter(i => getName(i).toLowerCase().includes(q.toLowerCase()))
+    : items;
+
+  const colors = {
+    blue:   { active: "bg-blue-100 border-blue-300 text-blue-700",   idle: "bg-white border-gray-200 text-gray-600 hover:border-blue-200" },
+    indigo: { active: "bg-indigo-100 border-indigo-300 text-indigo-700", idle: "bg-white border-gray-200 text-gray-600 hover:border-indigo-200" },
+  };
+  const c = colors[accentColor] || colors.blue;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+        {selected.length > 0 && (
+          <span className="text-[10px] text-gray-400">{selected.length} selected</span>
+        )}
+      </div>
+
+      {items.length > PILL_THRESHOLD && (
+        <div className="relative mb-2">
+          <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder={`Search ${label.toLowerCase()}…`}
+            className="w-full pl-7 pr-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-100 transition"
+          />
+          {q && (
+            <button onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex gap-1.5 flex-wrap">
+        {visible.length === 0 && <p className="text-xs text-gray-400 italic">No matches</p>}
+        {visible.map(item => {
+          const id = getId(item);
+          const isActive = selected.includes(id);
+          return (
+            <button
+              key={id}
+              onClick={() => onToggle(id)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${isActive ? c.active : c.idle}`}
+            >
+              {getName(item)}{isActive && <span className="ml-1 opacity-60">×</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Searchable dropdown group (Authors / Publishers) ─────────────────────────
+// Text input → filtered list with checkboxes; selected tags shown above input.
+function SearchableFilterGroup({ label, items, selected, onToggle, idField, nameField, accentColor }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  const getId   = item => item[idField]   || item.id;
+  const getName = item => item[nameField] || item.name;
+
+  const filtered = q.trim()
+    ? items.filter(i => getName(i).toLowerCase().includes(q.toLowerCase()))
+    : items;
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const colors = {
+    violet: { tag: "bg-violet-100 text-violet-700 border-violet-200", check: "accent-violet-600" },
+    orange: { tag: "bg-orange-100 text-orange-700 border-orange-200", check: "accent-orange-500" },
+  };
+  const c = colors[accentColor] || colors.violet;
+
+  const selectedItems = items.filter(i => selected.includes(getId(i)));
+
+  return (
+    <div ref={ref}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+        {selected.length > 0 && (
+          <span className="text-[10px] text-gray-400">{selected.length} selected</span>
+        )}
+      </div>
+
+      {/* Selected tags */}
+      {selectedItems.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selectedItems.map(item => {
+            const id = getId(item);
+            return (
+              <span key={id} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${c.tag}`}>
+                {getName(item)}
+                <button onClick={() => onToggle(id)} className="hover:opacity-70 transition">
+                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Search input */}
+      <div className="relative">
+        <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input
+          type="text"
+          value={q}
+          onChange={e => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder={`Search ${label.toLowerCase()}…`}
+          className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-100 transition bg-white"
+        />
+        {q && (
+          <button onClick={() => setQ("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        )}
+      </div>
+
+      {/* Dropdown list */}
+      {open && (
+        <div className="mt-1 border border-gray-200 rounded-lg bg-white shadow-lg max-h-44 overflow-y-auto z-10 relative">
+          {filtered.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-gray-400 italic text-center">No matches</p>
+          ) : (
+            filtered.map(item => {
+              const id = getId(item);
+              const isActive = selected.includes(id);
+              return (
+                <label
+                  key={id}
+                  className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer text-xs transition-colors ${isActive ? "bg-gray-50" : "hover:bg-gray-50"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isActive}
+                    onChange={() => onToggle(id)}
+                    className={`w-3.5 h-3.5 rounded ${c.check} border-gray-300 cursor-pointer`}
+                  />
+                  <span className={`flex-1 truncate ${isActive ? "font-medium text-gray-800" : "text-gray-600"}`}>
+                    {getName(item)}
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Books() {
   const navigate = useNavigate();
   const [books, setBooks] = useState([]);
@@ -142,7 +316,7 @@ export default function Books() {
 
   // Import state
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importStep, setImportStep] = useState("upload"); // "upload" | "preview" | "result"
+  const [importStep, setImportStep] = useState("upload");
   const [importRows, setImportRows] = useState([]);
   const [importHeaders, setImportHeaders] = useState([]);
   const [importError, setImportError] = useState("");
@@ -202,10 +376,7 @@ export default function Books() {
 
   const clearAllFilters = () => { setCategories([]); setGenres([]); setAuthors([]); setPublishers([]); };
 
-  const getId   = (item, field) => item[field] || item.id;
-  const getName = (item, field) => item[field] || item.name;
-
-  // ── Import handlers ─────────────────────────────────────────────────────
+  // ── Import handlers ────────────────────────────────────────────────────────
   const resetImport = () => {
     setImportStep("upload"); setImportRows([]); setImportHeaders([]);
     setImportError(""); setImportResult(null); setFileType("");
@@ -249,8 +420,7 @@ export default function Books() {
       setImportStep("result");
       if (res.data.created > 0) fetchBooks();
     } catch (err) {
-      const msg = err.response?.data?.error || "Import failed";
-      setImportError(msg);
+      setImportError(err.response?.data?.error || "Import failed");
     } finally { setImporting(false); }
   };
 
@@ -264,7 +434,6 @@ export default function Books() {
       URL.revokeObjectURL(url);
     } else {
       const ws = XLSX.utils.aoa_to_sheet([headerRow, exampleRow]);
-      // Bold / highlight required columns
       ws["!cols"] = headerRow.map(() => ({ wch: 22 }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Books");
@@ -272,7 +441,7 @@ export default function Books() {
     }
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
       <style>{styles}</style>
@@ -343,48 +512,85 @@ export default function Books() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
               </svg>
               Filters
-              {activeFilterCount > 0 && <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full">{activeFilterCount}</span>}
+              {activeFilterCount > 0 && (
+                <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full">{activeFilterCount}</span>
+              )}
               <svg className={`w-3 h-3 transition-transform ${filtersOpen ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </button>
           </div>
 
-          {/* Collapsible filters */}
+          {/* ── Collapsible filters ── */}
           {filtersOpen && (
-            <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5 space-y-5">
-              <div className="flex justify-between items-center">
+            <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5">
+              <div className="flex justify-between items-center mb-4">
                 <p className="text-sm font-semibold text-gray-700">Filter by</p>
-                {activeFilterCount > 0 && <button onClick={clearAllFilters} className="text-xs text-red-500 hover:underline">Clear all ({activeFilterCount})</button>}
+                {activeFilterCount > 0 && (
+                  <button onClick={clearAllFilters} className="text-xs text-red-500 hover:underline">
+                    Clear all ({activeFilterCount})
+                  </button>
+                )}
               </div>
-              {filtersLoading ? <p className="text-sm text-gray-400">Loading filters...</p> : (
-                <div className="space-y-4">
-                  {[
-                    { label: "Categories", items: allCategories, selected: categories, setSelected: setCategories, idField: "category_id", nameField: "category_name", color: "blue" },
-                    { label: "Genres",     items: allGenres,     selected: genres,     setSelected: setGenres,     idField: "genre_id",    nameField: "genre_name",    color: "indigo" },
-                    { label: "Authors",    items: allAuthors,    selected: authors,    setSelected: setAuthors,    idField: "author_id",   nameField: "author_name",   color: "violet" },
-                    { label: "Publishers", items: allPublishers, selected: publishers, setSelected: setPublishers, idField: "publication_id", nameField: "publication_name", color: "orange" },
-                  ].map(({ label, items, selected, setSelected, idField, nameField, color }) =>
-                    items.length > 0 ? (
-                      <div key={label}>
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{label}</p>
-                        <div className="flex gap-2 flex-wrap">
-                          {items.map(item => {
-                            const id = getId(item, idField);
-                            const isActive = selected.includes(id);
-                            return (
-                              <button key={id} onClick={() => toggleFilter(id, selected, setSelected)}
-                                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                                  isActive ? `bg-${color}-100 border-${color}-300 text-${color}-700` : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
-                                }`}>
-                                {getName(item, nameField)}{isActive && <span className="ml-1">×</span>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null
+
+              {filtersLoading ? (
+                <p className="text-sm text-gray-400">Loading filters…</p>
+              ) : (
+                // 2-column grid: left = pill groups, right = searchable groups
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
+
+                  {/* Categories — pills */}
+                  {allCategories.length > 0 && (
+                    <PillFilterGroup
+                      label="Categories"
+                      items={allCategories}
+                      selected={categories}
+                      onToggle={id => toggleFilter(id, categories, setCategories)}
+                      idField="category_id"
+                      nameField="category_name"
+                      accentColor="blue"
+                    />
                   )}
+
+                  {/* Authors — searchable dropdown */}
+                  {allAuthors.length > 0 && (
+                    <SearchableFilterGroup
+                      label="Authors"
+                      items={allAuthors}
+                      selected={authors}
+                      onToggle={id => toggleFilter(id, authors, setAuthors)}
+                      idField="author_id"
+                      nameField="author_name"
+                      accentColor="violet"
+                    />
+                  )}
+
+                  {/* Genres — pills */}
+                  {allGenres.length > 0 && (
+                    <PillFilterGroup
+                      label="Genres"
+                      items={allGenres}
+                      selected={genres}
+                      onToggle={id => toggleFilter(id, genres, setGenres)}
+                      idField="genre_id"
+                      nameField="genre_name"
+                      accentColor="indigo"
+                    />
+                  )}
+
+                  {/* Publishers — searchable dropdown */}
+                  {allPublishers.length > 0 && (
+                    <SearchableFilterGroup
+                      label="Publishers"
+                      items={allPublishers}
+                      selected={publishers}
+                      onToggle={id => toggleFilter(id, publishers, setPublishers)}
+                      idField="publication_id"
+                      nameField="publication_name"
+                      accentColor="orange"
+                    />
+                  )}
+
                 </div>
               )}
             </div>
@@ -432,7 +638,9 @@ export default function Books() {
                               {genre.genre_name}
                             </span>
                           ))}
-                          {book.publication_year && <span className="text-[10px] text-gray-400 ml-auto self-end">{book.publication_year}</span>}
+                          {book.publication_year && (
+                            <span className="text-[10px] text-gray-400 ml-auto self-end">{book.publication_year}</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -457,12 +665,11 @@ export default function Books() {
         </div>
       </div>
 
-      {/* ── Import Modal ──────────────────────────────────────────────────────── */}
+      {/* ── Import Modal ───────────────────────────────────────────────────────── */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
 
-            {/* Header */}
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -480,7 +687,6 @@ export default function Books() {
               </button>
             </div>
 
-            {/* Step tabs */}
             <div className="px-6 pt-4 shrink-0">
               <div className="flex items-center gap-2 text-xs mb-5">
                 {[["upload", "1. Upload"], ["preview", "2. Preview"], ["result", "3. Result"]].map(([step, label], i) => (
@@ -494,7 +700,6 @@ export default function Books() {
 
             <div className="overflow-y-auto flex-1 px-6 pb-6">
 
-              {/* ── STEP 1: Upload ── */}
               {importStep === "upload" && (
                 <div className="space-y-5">
                   <div
@@ -524,7 +729,6 @@ export default function Books() {
                     </div>
                   )}
 
-                  {/* Format guide */}
                   <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-xs font-semibold text-gray-600">Expected format</p>
@@ -567,7 +771,6 @@ export default function Books() {
                 </div>
               )}
 
-              {/* ── STEP 2: Preview ── */}
               {importStep === "preview" && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -638,7 +841,6 @@ export default function Books() {
                 </div>
               )}
 
-              {/* ── STEP 3: Result ── */}
               {importStep === "result" && importResult && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-3">
